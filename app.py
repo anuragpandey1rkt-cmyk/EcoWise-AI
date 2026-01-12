@@ -85,7 +85,6 @@ init_session_state()
 
 def go_to(page):
     st.session_state.feature = page
-    st.rerun()
 
 # ==========================================
 # 3. BACKEND HELPERS
