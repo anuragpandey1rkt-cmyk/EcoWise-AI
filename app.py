@@ -19,25 +19,20 @@ st.set_page_config(
 )
 
 def make_pwa_ready():
-    # This CSS specifically fixes the "Hidden Button" issue by respecting the phone's notch
     st.markdown("""
         <meta name="apple-mobile-web-app-capable" content="yes">
         <meta name="mobile-web-app-capable" content="yes">
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
         <style>
             footer {visibility: hidden;}
-            
-            /* FORCE content down so it starts BELOW the status bar/notch */
             div.block-container {
-                padding-top: max(3.5rem, env(safe-area-inset-top)) !important;
-                padding-bottom: 5rem !important;
+                padding-top: max(3.5rem, env(safe-area-inset-top));
+                padding-bottom: 5rem;
             }
-            
-            /* Make the Back button stand out */
+            /* Make buttons look better on mobile */
             div.stButton > button {
                 width: 100%;
-                border-radius: 10px;
-                font-weight: bold;
+                border-radius: 8px;
             }
         </style>
     """, unsafe_allow_html=True)
@@ -74,7 +69,6 @@ def init_session_state():
         "xp": 0,
         "streak": 0,
         "last_action_date": None,
-        "chat_history": [],
         "waste_guidelines_text": "" 
     }
     for key, value in defaults.items():
@@ -83,13 +77,14 @@ def init_session_state():
 
 init_session_state()
 
-def go_to(page):
+# Navigation Helper (Used for Sidebar)
+def navigate_to(page):
     st.session_state.feature = page
+    st.rerun()
 
 # ==========================================
 # 3. BACKEND HELPERS
 # ==========================================
-
 def ask_ai(prompt, system_role="You are a helpful Sustainability Expert."):
     try:
         completion = groq_client.chat.completions.create(
@@ -122,7 +117,7 @@ def login_user(email, password):
         st.session_state.user = response.user
         st.session_state.user_id = response.user.id
         sync_user_stats(response.user.id)
-        st.success("Welcome back, Eco Warrior!")
+        st.success("Welcome back!")
         time.sleep(1)
         st.rerun()
     except Exception as e:
@@ -135,8 +130,7 @@ def signup_user(email, password):
             supabase.table("user_stats").insert({
                 "user_id": response.user.id,
                 "xp": 0,
-                "streak": 0,
-                "last_study_date": None
+                "streak": 0
             }).execute()
             st.success("Account created! Please log in.")
     except Exception as e:
@@ -154,7 +148,6 @@ def sync_user_stats(user_id):
             stats = data.data[0]
             st.session_state.xp = stats.get('xp', 0)
             
-            # Streak Logic
             last_date_str = stats.get('last_study_date')
             db_streak = stats.get('streak', 0)
             
@@ -180,23 +173,19 @@ def add_xp(amount, activity_name):
     
     try:
         supabase.table("user_stats").update({"xp": st.session_state.xp}).eq("user_id", st.session_state.user_id).execute()
-        
         supabase.table("study_logs").insert({
             "user_id": st.session_state.user_id,
             "minutes": amount, 
             "activity_type": activity_name,
             "date": today
         }).execute()
-        
         st.toast(f"🌱 +{amount} Green Points!", icon="🌍")
         
-        # Update Streak
         if st.session_state.last_action_date != today:
             new_streak = st.session_state.streak + 1
             st.session_state.streak = new_streak
             st.session_state.last_action_date = today
             supabase.table("user_stats").update({"streak": new_streak, "last_study_date": today}).eq("user_id", st.session_state.user_id).execute()
-            
     except Exception as e:
         st.error(f"Sync Error: {e}")
 
@@ -205,14 +194,12 @@ def add_xp(amount, activity_name):
 # ==========================================
 
 def render_home():
-    # Spacer to ensure title isn't hidden
     st.write("") 
     st.title("🌍 EcoWise Dashboard")
     
     c1, c2, c3 = st.columns(3)
     c1.metric("🌱 Points", st.session_state.xp)
     c2.metric("🔥 Streak", f"{st.session_state.streak} Days")
-    
     level = "Eco-Warrior" if st.session_state.xp > 500 else "Rookie"
     c3.metric("🏆 Rank", level)
     
@@ -221,15 +208,17 @@ def render_home():
     
     col1, col2 = st.columns(2)
     with col1:
-        st.button("♻️ Recycle Assistant", use_container_width=True, on_click=go_to, args=("♻️ Recycle Assistant",))
-        st.button("🕵️ Greenwash Detector", use_container_width=True, on_click=go_to, args=("🕵️ Greenwash Detector",))
+        if st.button("♻️ Recycle Assistant", use_container_width=True): navigate_to("♻️ Recycle Assistant")
+        if st.button("🕵️ Greenwash Detector", use_container_width=True): navigate_to("🕵️ Greenwash Detector")
     with col2:
-        st.button("👣 Carbon Tracker", use_container_width=True, on_click=go_to, args=("👣 Carbon Tracker",))
-        st.button("🎮 Eco-Challenges", use_container_width=True, on_click=go_to, args=("🎮 Eco-Challenges",))
+        if st.button("👣 Carbon Tracker", use_container_width=True): navigate_to("👣 Carbon Tracker")
+        if st.button("🎮 Eco-Challenges", use_container_width=True): navigate_to("🎮 Eco-Challenges")
 
 def render_recycle_assistant():
-    st.write("") # Spacer
-    if st.button("⬅️ Back to Home"): go_to("🏠 Home")
+    st.write("")
+    # FIX: Direct Logic - Single Click Works
+    if st.button("⬅️ Back to Home"):
+        navigate_to("🏠 Home")
     
     st.header("♻️ Smart Recycle Assistant")
     st.info("Upload your local city/campus waste guidelines (PDF) to get accurate answers.")
@@ -240,10 +229,9 @@ def render_recycle_assistant():
             text = extract_text_from_pdf(uploaded_file)
             if text:
                 st.session_state.waste_guidelines_text = text
-                st.success("✅ Guidelines Loaded! AI is now locally aware.")
+                st.success("✅ Guidelines Loaded!")
     
     user_query = st.chat_input("E.g., Can I recycle pizza boxes?")
-    
     if user_query:
         with st.spinner("Consulting Guidelines..."):
             system_role = "You are a waste management expert. Use the provided guidelines if available."
@@ -256,46 +244,37 @@ def render_recycle_assistant():
             add_xp(5, "Waste Query")
 
 def render_greenwash_detector():
-    st.write("") # Spacer
-    if st.button("⬅️ Back to Home"): go_to("🏠 Home")
+    st.write("")
+    if st.button("⬅️ Back to Home"):
+        navigate_to("🏠 Home")
     
     st.header("🕵️ Greenwash Detector")
-    st.write("Paste a product description. AI will analyze if it's truly eco-friendly.")
+    st.write("Paste a product description to check for eco-authenticity.")
     
-    product_text = st.text_area("Product Claim (e.g., '100% Natural Organic Bottle')")
-    
+    product_text = st.text_area("Product Claim")
     if st.button("Analyze Claim"):
         if product_text:
-            with st.spinner("Auditing claim with AI..."):
-                prompt = (
-                    f"Analyze this product claim for 'Greenwashing'. \n"
-                    f"Claim: '{product_text}'\n"
-                    f"1. Is it vague? \n"
-                    f"2. Are there proof/certifications? \n"
-                    f"3. Verdict: Greenwashed or Genuine? \n"
-                    f"Provide a strict, fact-based analysis."
-                )
+            with st.spinner("Auditing..."):
+                prompt = (f"Analyze this product claim for 'Greenwashing'. Claim: '{product_text}'\n"
+                          "1. Is it vague? 2. Proof? 3. Verdict: Greenwashed or Genuine?")
                 analysis = ask_ai(prompt)
-                st.markdown("### 🔍 AI Audit Report")
                 st.markdown(analysis)
                 add_xp(10, "Greenwash Check")
         else:
-            st.warning("Please enter text first.")
+            st.warning("Enter text first.")
 
 def render_carbon_tracker():
-    st.write("") # Spacer
-    if st.button("⬅️ Back to Home"): go_to("🏠 Home")
+    st.write("")
+    if st.button("⬅️ Back to Home"):
+        navigate_to("🏠 Home")
     
     st.header("👣 Daily Carbon Tracker")
-    st.write("Log your habits, and the AI will calculate your impact and give a tip.")
-    
     transport = st.selectbox("Transport", ["Walk/Cycle", "Bus/Train", "Car (Petrol)", "Car (EV)"])
     meal = st.selectbox("Meal", ["Plant-based", "Vegetarian", "Meat-heavy"])
-    energy = st.checkbox("Did you save energy (Lights off/AC off)?")
+    energy = st.checkbox("Saved Energy?")
     
-    if st.button("Calculate & Get AI Tip"):
-        with st.spinner("AI is calculating impact..."):
-            # 1. Calculate Score (Gamification)
+    if st.button("Calculate Impact"):
+        with st.spinner("Calculating..."):
             score = 0
             if transport == "Walk/Cycle": score += 20
             elif transport == "Car (Petrol)": score -= 10
@@ -303,36 +282,29 @@ def render_carbon_tracker():
             elif meal == "Meat-heavy": score -= 10
             if energy: score += 10
             
-            # 2. Get AI Advice (Real-time)
-            prompt = f"The user traveled by {transport}, ate a {meal} meal, and {'saved' if energy else 'did not save'} energy. Give them 1 specific, encouraging eco-tip (max 20 words)."
+            prompt = f"User did: {transport}, {meal}, Energy Saved: {energy}. Give 1 short eco-tip."
             ai_tip = ask_ai(prompt)
             
-            # 3. Display
-            st.success(f"Daily Score: {score}/50")
-            st.info(f"💡 **AI Tip:** {ai_tip}")
-            
-            if score > 0:
-                add_xp(score, "Daily Carbon Log")
+            st.success(f"Score: {score}/50")
+            st.info(f"💡 Tip: {ai_tip}")
+            if score > 0: add_xp(score, "Daily Carbon Log")
 
 def render_challenges():
-    st.write("") # Spacer
-    if st.button("⬅️ Back to Home"): go_to("🏠 Home")
+    st.write("")
+    if st.button("⬅️ Back to Home"):
+        navigate_to("🏠 Home")
     
     st.header("🎮 Eco-Challenges")
-    st.info("Real-world actions to take today.")
-    
     challenges = [
-        {"task": "Use a reusable water bottle", "xp": 20},
-        {"task": "Refuse a plastic bag", "xp": 15},
-        {"task": "Segregate wet & dry waste", "xp": 25},
-        {"task": "Turn off tap while brushing", "xp": 10}
+        {"task": "Reusable Bottle", "xp": 20},
+        {"task": "Refuse Plastic Bag", "xp": 15},
+        {"task": "Segregate Waste", "xp": 25},
+        {"task": "Save Water", "xp": 10}
     ]
-    
     for c in challenges:
-        col1, col2 = st.columns([4, 1])
-        col1.write(f"**{c['task']}**")
-        if col2.button(f"Claim +{c['xp']}", key=c['task']):
-            # This saves to the REAL database
+        c1, c2 = st.columns([3,1])
+        c1.write(f"**{c['task']}**")
+        if c2.button(f"Claim +{c['xp']}", key=c['task']):
             add_xp(c['xp'], c['task'])
             st.balloons()
 
@@ -344,12 +316,12 @@ def main():
     
     if not st.session_state.user:
         st.title("🌱 EcoWise Login")
-        tab1, tab2 = st.tabs(["Login", "Sign Up"])
-        with tab1:
+        t1, t2 = st.tabs(["Login", "Sign Up"])
+        with t1:
             e = st.text_input("Email")
             p = st.text_input("Password", type="password")
             if st.button("Login"): login_user(e, p)
-        with tab2:
+        with t2:
             e2 = st.text_input("Email (Sign Up)")
             p2 = st.text_input("Password (Sign Up)", type="password")
             if st.button("Sign Up"): signup_user(e2, p2)
@@ -361,11 +333,12 @@ def main():
         st.caption("Powered by Llama 3 & IBM Granite Ready")
         st.write(f"👤 {st.session_state.user.email}")
         
-        opts = ["🏠 Home", "♻️ Recycle Assistant", "🕵️ Greenwash Detector", "👣 Carbon Tracker", "🎮 Eco-Challenges"]
-        for o in opts:
-            if st.button(o, use_container_width=True):
-                go_to(o)
-                
+        if st.button("🏠 Home", use_container_width=True): navigate_to("🏠 Home")
+        if st.button("♻️ Recycle Assistant", use_container_width=True): navigate_to("♻️ Recycle Assistant")
+        if st.button("🕵️ Greenwash Detector", use_container_width=True): navigate_to("🕵️ Greenwash Detector")
+        if st.button("👣 Carbon Tracker", use_container_width=True): navigate_to("👣 Carbon Tracker")
+        if st.button("🎮 Eco-Challenges", use_container_width=True): navigate_to("🎮 Eco-Challenges")
+        
         st.divider()
         if st.button("🚪 Logout"): logout_user()
 
