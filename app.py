@@ -105,7 +105,7 @@ def analyze_image(image_bytes):
     try:
         encoded_image = base64.b64encode(image_bytes).decode('utf-8')
         completion = groq_client.chat.completions.create(
-            model="llama-3.2-11b-vision-preview",
+            model="llama-3.2-90b-vision-preview", # <--- UPDATED TO NEW MODEL
             messages=[
                 {
                     "role": "user",
@@ -351,26 +351,49 @@ def render_analytics():
     else:
         st.info("Not enough data for analytics yet.")
 
-# --- OLD FEATURES (KEEPING THEM) ---
 def render_recycle_assistant():
-    st.write(""); st.button("⬅️ Back", on_click=navigate_to, args=("🏠 Home",))
-    st.header("♻️ Recycle Assistant")
-    user_query = st.chat_input("Ask about recycling...")
+    st.write("")
+    if st.button("⬅️ Back"): navigate_to("🏠 Home")
+    st.header("♻️ Smart Recycle Assistant")
+    
+    with st.expander("📂 Upload Municipal Guidelines (PDF)", expanded=False):
+        uploaded_file = st.file_uploader("Upload Waste Guide PDF", type=['pdf'])
+        if uploaded_file:
+            text = extract_text_from_pdf(uploaded_file)
+            if text:
+                st.session_state.waste_guidelines_text = text
+                st.success("✅ Guidelines Loaded!")
+    
+    user_query = st.chat_input("E.g., Can I recycle pizza boxes?")
     if user_query:
-        res = ask_ai(user_query)
-        st.write(res); add_xp(5, "Query")
+        with st.spinner("Thinking..."):
+            system_role = "You are a waste management expert. Use the provided guidelines if available."
+            if st.session_state.waste_guidelines_text:
+                system_role += f"\n\nOFFICIAL GUIDELINES:\n{st.session_state.waste_guidelines_text[:15000]}"
+            res = ask_ai(user_query, system_role)
+            st.chat_message("user").write(user_query)
+            st.chat_message("assistant").write(res)
+            add_xp(5, "Waste Query")
 
 def render_greenwash_detector():
-    st.write(""); st.button("⬅️ Back", on_click=navigate_to, args=("🏠 Home",))
+    st.write("")
+    if st.button("⬅️ Back"): navigate_to("🏠 Home")
     st.header("🕵️ Greenwash Detector")
     txt = st.text_area("Product Claim")
     if st.button("Analyze") and txt:
-        st.write(ask_ai(f"Analyze greenwashing: {txt}")); add_xp(10, "Check")
+        with st.spinner("Auditing..."):
+            st.write(ask_ai(f"Analyze greenwashing: {txt}"))
+            add_xp(10, "Greenwash Check")
 
 def render_carbon_tracker():
-    st.write(""); st.button("⬅️ Back", on_click=navigate_to, args=("🏠 Home",))
+    st.write("")
+    if st.button("⬅️ Back"): navigate_to("🏠 Home")
     st.header("👣 Carbon Tracker")
-    if st.button("Log Sustainable Meal"): add_xp(20, "Eco Meal"); st.success("Logged!")
+    
+    t = st.selectbox("Transport", ["Walk/Cycle", "Car", "Bus"])
+    if st.button("Log Sustainable Action"):
+        add_xp(20, f"Transport: {t}")
+        st.success("Logged!")
 
 # ==========================================
 # 5. MAIN NAV
