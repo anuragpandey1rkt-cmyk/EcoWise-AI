@@ -2,3 +2,5 @@ streamlit
 supabase
 groq
 PyPDF2
+folium
+streamlit-folium
