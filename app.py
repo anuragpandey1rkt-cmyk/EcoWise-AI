@@ -19,16 +19,25 @@ st.set_page_config(
 )
 
 def make_pwa_ready():
+    # This CSS specifically fixes the "Hidden Button" issue by respecting the phone's notch
     st.markdown("""
         <meta name="apple-mobile-web-app-capable" content="yes">
         <meta name="mobile-web-app-capable" content="yes">
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
         <style>
             footer {visibility: hidden;}
-            /* FIXED: Increased top padding to 4rem so the Back button isn't hidden behind the phone notch */
-            .block-container { 
-                padding-top: 4rem !important; 
-                padding-bottom: 5rem !important; 
+            
+            /* FORCE content down so it starts BELOW the status bar/notch */
+            div.block-container {
+                padding-top: max(3.5rem, env(safe-area-inset-top)) !important;
+                padding-bottom: 5rem !important;
+            }
+            
+            /* Make the Back button stand out */
+            div.stButton > button {
+                width: 100%;
+                border-radius: 10px;
+                font-weight: bold;
             }
         </style>
     """, unsafe_allow_html=True)
@@ -175,7 +184,7 @@ def add_xp(amount, activity_name):
         
         supabase.table("study_logs").insert({
             "user_id": st.session_state.user_id,
-            "minutes": amount, # Using 'minutes' column to store points/impact
+            "minutes": amount, 
             "activity_type": activity_name,
             "date": today
         }).execute()
@@ -197,14 +206,16 @@ def add_xp(amount, activity_name):
 # ==========================================
 
 def render_home():
+    # Spacer to ensure title isn't hidden
+    st.write("") 
     st.title("🌍 EcoWise Dashboard")
     
     c1, c2, c3 = st.columns(3)
-    c1.metric("🌱 Green Points", st.session_state.xp)
-    c2.metric("🔥 Eco Streak", f"{st.session_state.streak} Days")
+    c1.metric("🌱 Points", st.session_state.xp)
+    c2.metric("🔥 Streak", f"{st.session_state.streak} Days")
     
     level = "Eco-Warrior" if st.session_state.xp > 500 else "Rookie"
-    c3.metric("🏆 Status", level)
+    c3.metric("🏆 Rank", level)
     
     st.divider()
     st.markdown("### 🚀 Quick Actions")
@@ -218,7 +229,8 @@ def render_home():
         st.button("🎮 Eco-Challenges", use_container_width=True, on_click=go_to, args=("🎮 Eco-Challenges",))
 
 def render_recycle_assistant():
-    st.button("⬅️ Back to Home", on_click=go_to, args=("🏠 Home",)) # FIXED BUTTON
+    st.write("") # Spacer
+    if st.button("⬅️ Back to Home"): go_to("🏠 Home")
     
     st.header("♻️ Smart Recycle Assistant")
     st.info("Upload your local city/campus waste guidelines (PDF) to get accurate answers.")
@@ -245,7 +257,8 @@ def render_recycle_assistant():
             add_xp(5, "Waste Query")
 
 def render_greenwash_detector():
-    st.button("⬅️ Back to Home", on_click=go_to, args=("🏠 Home",)) # FIXED BUTTON
+    st.write("") # Spacer
+    if st.button("⬅️ Back to Home"): go_to("🏠 Home")
     
     st.header("🕵️ Greenwash Detector")
     st.write("Paste a product description. AI will analyze if it's truly eco-friendly.")
@@ -271,9 +284,10 @@ def render_greenwash_detector():
             st.warning("Please enter text first.")
 
 def render_carbon_tracker():
-    st.button("⬅️ Back to Home", on_click=go_to, args=("🏠 Home",)) # FIXED BUTTON
+    st.write("") # Spacer
+    if st.button("⬅️ Back to Home"): go_to("🏠 Home")
     
-    st.header("👣 Daily Carbon Tracker (AI Powered)")
+    st.header("👣 Daily Carbon Tracker")
     st.write("Log your habits, and the AI will calculate your impact and give a tip.")
     
     transport = st.selectbox("Transport", ["Walk/Cycle", "Bus/Train", "Car (Petrol)", "Car (EV)"])
@@ -302,7 +316,8 @@ def render_carbon_tracker():
                 add_xp(score, "Daily Carbon Log")
 
 def render_challenges():
-    st.button("⬅️ Back to Home", on_click=go_to, args=("🏠 Home",)) # FIXED BUTTON
+    st.write("") # Spacer
+    if st.button("⬅️ Back to Home"): go_to("🏠 Home")
     
     st.header("🎮 Eco-Challenges")
     st.info("Real-world actions to take today.")
