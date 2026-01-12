@@ -25,7 +25,11 @@ def make_pwa_ready():
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
         <style>
             footer {visibility: hidden;}
-            .block-container { padding-top: 1rem !important; padding-bottom: 5rem !important; }
+            /* FIXED: Increased top padding to 4rem so the Back button isn't hidden behind the phone notch */
+            .block-container { 
+                padding-top: 4rem !important; 
+                padding-bottom: 5rem !important; 
+            }
         </style>
     """, unsafe_allow_html=True)
 
@@ -214,7 +218,7 @@ def render_home():
         st.button("🎮 Eco-Challenges", use_container_width=True, on_click=go_to, args=("🎮 Eco-Challenges",))
 
 def render_recycle_assistant():
-    if st.button("⬅️ Back to Home"): go_to("🏠 Home") # <--- BACK BUTTON
+    st.button("⬅️ Back to Home", on_click=go_to, args=("🏠 Home",)) # FIXED BUTTON
     
     st.header("♻️ Smart Recycle Assistant")
     st.info("Upload your local city/campus waste guidelines (PDF) to get accurate answers.")
@@ -241,7 +245,7 @@ def render_recycle_assistant():
             add_xp(5, "Waste Query")
 
 def render_greenwash_detector():
-    if st.button("⬅️ Back to Home"): go_to("🏠 Home") # <--- BACK BUTTON
+    st.button("⬅️ Back to Home", on_click=go_to, args=("🏠 Home",)) # FIXED BUTTON
     
     st.header("🕵️ Greenwash Detector")
     st.write("Paste a product description. AI will analyze if it's truly eco-friendly.")
@@ -267,7 +271,7 @@ def render_greenwash_detector():
             st.warning("Please enter text first.")
 
 def render_carbon_tracker():
-    if st.button("⬅️ Back to Home"): go_to("🏠 Home") # <--- BACK BUTTON
+    st.button("⬅️ Back to Home", on_click=go_to, args=("🏠 Home",)) # FIXED BUTTON
     
     st.header("👣 Daily Carbon Tracker (AI Powered)")
     st.write("Log your habits, and the AI will calculate your impact and give a tip.")
@@ -298,7 +302,7 @@ def render_carbon_tracker():
                 add_xp(score, "Daily Carbon Log")
 
 def render_challenges():
-    if st.button("⬅️ Back to Home"): go_to("🏠 Home") # <--- BACK BUTTON
+    st.button("⬅️ Back to Home", on_click=go_to, args=("🏠 Home",)) # FIXED BUTTON
     
     st.header("🎮 Eco-Challenges")
     st.info("Real-world actions to take today.")
