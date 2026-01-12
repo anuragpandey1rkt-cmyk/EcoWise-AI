@@ -77,6 +77,7 @@ def init_session_state():
 
 init_session_state()
 
+# --- ROBUST NAVIGATION FUNCTION ---
 def navigate_to(page):
     st.session_state.feature = page
     st.rerun()
@@ -88,7 +89,7 @@ def navigate_to(page):
 def ask_ai(prompt, system_role="You are a helpful Sustainability Expert."):
     try:
         completion = groq_client.chat.completions.create(
-            model="llama-3.1-8b-instant",
+            model="llama-3.3-70b-versatile", # Switched to most stable model
             messages=[
                 {"role": "system", "content": system_role},
                 {"role": "user", "content": prompt}
@@ -101,12 +102,14 @@ def ask_ai(prompt, system_role="You are a helpful Sustainability Expert."):
         return f"AI Error: {str(e)}"
 
 def analyze_image(image_bytes):
-    """Uses Llama 3.2 Vision to analyze trash/items"""
+    """
+    Tries to use Llama 3.2 Vision. 
+    If Groq has decommissioned the model, it returns a specific error tag.
+    """
     try:
         encoded_image = base64.b64encode(image_bytes).decode('utf-8')
         completion = groq_client.chat.completions.create(
-            # UPDATED MODEL HERE
-            model="llama-3.2-90b-vision-preview", 
+            model="llama-3.2-11b-vision-preview", # Trying standard preview
             messages=[
                 {
                     "role": "user",
@@ -121,10 +124,12 @@ def analyze_image(image_bytes):
         )
         return completion.choices[0].message.content
     except Exception as e:
+        # Fallback for "Model Decommissioned" error
+        if "model_decommissioned" in str(e) or "400" in str(e):
+            return "MODEL_ERROR" 
         return f"Vision Error: {str(e)}"
 
 def transcribe_audio(audio_bytes):
-    """Uses Whisper to transcribe voice"""
     try:
         transcription = groq_client.audio.transcriptions.create(
             file=("voice.wav", audio_bytes),
@@ -175,7 +180,6 @@ def add_xp(amount, activity_name):
         }).execute()
         st.toast(f"🌱 +{amount} Green Points!", icon="🌍")
         
-        # Streak Logic
         if st.session_state.last_action_date != today:
             new_streak = st.session_state.streak + 1
             st.session_state.streak = new_streak
@@ -202,7 +206,6 @@ def render_home():
     
     col1, col2 = st.columns(2)
     with col1:
-        # FIXED: Removed on_click, using direct if logic
         if st.button("📸 Visual Sorter", use_container_width=True): navigate_to("📸 Visual Sorter")
         if st.button("🎙️ Voice Mode", use_container_width=True): navigate_to("🎙️ Voice Mode")
         if st.button("♻️ Recycle Assistant", use_container_width=True): navigate_to("♻️ Recycle Assistant")
@@ -216,6 +219,7 @@ def render_home():
 def render_visual_sorter():
     st.write("")
     if st.button("⬅️ Back"): navigate_to("🏠 Home")
+    
     st.header("📸 AI Visual Waste Sorter")
     st.info("Take a photo of trash. The AI will tell you which bin to use.")
     
@@ -225,25 +229,34 @@ def render_visual_sorter():
         bytes_data = img_file.getvalue()
         with st.spinner("Analyzing image..."):
             result = analyze_image(bytes_data)
-            st.success("Analysis Complete!")
-            st.markdown(result)
-            add_xp(15, "Visual Scan")
+            
+            if result == "MODEL_ERROR":
+                st.warning("⚠️ Vision Model is temporarily updating. Please describe the item below:")
+                manual_desc = st.text_input("What is in the photo?")
+                if manual_desc and st.button("Analyze Text"):
+                    res = ask_ai(f"How do I recycle: {manual_desc}?")
+                    st.success("Analysis Complete!")
+                    st.markdown(res)
+                    add_xp(15, "Visual Scan (Fallback)")
+            else:
+                st.success("Analysis Complete!")
+                st.markdown(result)
+                add_xp(15, "Visual Scan")
 
 def render_voice_mode():
     st.write("")
     if st.button("⬅️ Back"): navigate_to("🏠 Home")
+    
     st.header("🎙️ Voice Assistant")
     st.write("Ask any eco-question (English/Hindi) using your voice.")
     
     audio_value = st.audio_input("Record your question")
     
     if audio_value:
-        with st.spinner("Listening & Thinking..."):
-            # 1. Transcribe
+        with st.spinner("Listening..."):
             text_query = transcribe_audio(audio_value)
             st.write(f"**You said:** {text_query}")
             
-            # 2. Get Answer
             response = ask_ai(text_query)
             st.markdown(f"**AI:** {response}")
             add_xp(10, "Voice Query")
@@ -251,13 +264,12 @@ def render_voice_mode():
 def render_map():
     st.write("")
     if st.button("⬅️ Back"): navigate_to("🏠 Home")
-    st.header("🗺️ Community Eco-Map")
-    st.write("Find or Add local recycling spots.")
     
-    # 1. Add Point Form
+    st.header("🗺️ Community Eco-Map")
+    
     with st.expander("📍 Add a New Spot"):
         with st.form("map_form"):
-            name = st.text_input("Location Name (e.g., Library Battery Bin)")
+            name = st.text_input("Location Name")
             lat = st.number_input("Latitude", value=28.6139, format="%.4f")
             lon = st.number_input("Longitude", value=77.2090, format="%.4f")
             ptype = st.selectbox("Type", ["Recycling", "Donation", "Hazardous Waste"])
@@ -270,9 +282,7 @@ def render_map():
                 add_xp(20, "Added Map Pin")
                 st.rerun()
 
-    # 2. Display Map
     points = supabase.table("map_points").select("*").execute().data
-    
     start_loc = [points[0]['latitude'], points[0]['longitude']] if points else [20.5937, 78.9629]
     m = folium.Map(location=start_loc, zoom_start=10)
     
@@ -290,103 +300,87 @@ def render_map():
 def render_marketplace():
     st.write("")
     if st.button("⬅️ Back"): navigate_to("🏠 Home")
-    st.header("🛒 Campus Swap (Circular Economy)")
-    st.write("Don't throw it away. Give it away!")
     
-    tab1, tab2 = st.tabs(["Browse Items", "Sell/Donate Item"])
+    st.header("🛒 Campus Swap")
+    
+    tab1, tab2 = st.tabs(["Browse", "Sell"])
     
     with tab1:
         items = supabase.table("marketplace_items").select("*").order("created_at", desc=True).execute().data
         if items:
             for i in items:
                 with st.container(border=True):
-                    c1, c2 = st.columns([3, 1])
-                    c1.subheader(i['item_name'])
-                    c1.write(i['description'])
-                    c1.caption(f"Contact: {i['contact_info']}")
-                    c2.metric("Price", i['price'])
+                    st.subheader(i['item_name'])
+                    st.write(i['description'])
+                    st.caption(f"Price: {i['price']} | Contact: {i['contact_info']}")
         else:
-            st.info("No items yet. Be the first to list something!")
+            st.info("No items yet.")
 
     with tab2:
         with st.form("sell_form"):
             name = st.text_input("Item Name")
             desc = st.text_area("Description")
-            price = st.text_input("Price (or 'Free')")
-            contact = st.text_input("Your Contact (Phone/Email)")
+            price = st.text_input("Price")
+            contact = st.text_input("Contact")
             if st.form_submit_button("List Item"):
                 supabase.table("marketplace_items").insert({
                     "user_id": st.session_state.user_id,
                     "item_name": name, "description": desc, "price": price, "contact_info": contact
                 }).execute()
-                st.success("Item Listed!")
+                st.success("Listed!")
                 add_xp(30, "Listed Item")
                 st.rerun()
 
 def render_analytics():
     st.write("")
     if st.button("⬅️ Back"): navigate_to("🏠 Home")
-    st.header("📊 Green Analytics")
     
+    st.header("📊 Green Analytics")
     logs = supabase.table("study_logs").select("*").execute().data
     
     if logs:
         df = pd.DataFrame(logs)
-        total_points = df['minutes'].sum()
-        st.metric("Total Community Green Points", total_points)
-        
-        st.subheader("Most Popular Eco-Activities")
-        chart_data = df['activity_type'].value_counts()
-        st.bar_chart(chart_data)
-        
-        st.subheader("Community Activity Over Time")
-        df['date'] = pd.to_datetime(df['date'])
-        daily_activity = df.groupby('date')['minutes'].sum()
-        st.line_chart(daily_activity)
+        st.metric("Total Community Green Points", df['minutes'].sum())
+        st.subheader("Popular Activities")
+        st.bar_chart(df['activity_type'].value_counts())
     else:
-        st.info("Not enough data for analytics yet.")
+        st.info("Not enough data.")
 
 def render_recycle_assistant():
     st.write("")
     if st.button("⬅️ Back"): navigate_to("🏠 Home")
-    st.header("♻️ Smart Recycle Assistant")
     
-    with st.expander("📂 Upload Municipal Guidelines (PDF)", expanded=False):
-        uploaded_file = st.file_uploader("Upload Waste Guide PDF", type=['pdf'])
-        if uploaded_file:
-            text = extract_text_from_pdf(uploaded_file)
-            if text:
-                st.session_state.waste_guidelines_text = text
-                st.success("✅ Guidelines Loaded!")
+    st.header("♻️ Recycle Assistant")
+    with st.expander("📂 Upload Guidelines"):
+        f = st.file_uploader("Upload PDF", type=['pdf'])
+        if f: 
+            st.session_state.waste_guidelines_text = extract_text_from_pdf(f)
+            st.success("Loaded!")
     
-    user_query = st.chat_input("E.g., Can I recycle pizza boxes?")
-    if user_query:
-        with st.spinner("Thinking..."):
-            system_role = "You are a waste management expert. Use the provided guidelines if available."
-            if st.session_state.waste_guidelines_text:
-                system_role += f"\n\nOFFICIAL GUIDELINES:\n{st.session_state.waste_guidelines_text[:15000]}"
-            res = ask_ai(user_query, system_role)
-            st.chat_message("user").write(user_query)
-            st.chat_message("assistant").write(res)
-            add_xp(5, "Waste Query")
+    q = st.chat_input("Ask question...")
+    if q:
+        role = "Waste Expert."
+        if st.session_state.waste_guidelines_text: role += f"\nData:\n{st.session_state.waste_guidelines_text[:10000]}"
+        res = ask_ai(q, role)
+        st.write(res); add_xp(5, "Query")
 
 def render_greenwash_detector():
     st.write("")
     if st.button("⬅️ Back"): navigate_to("🏠 Home")
+    
     st.header("🕵️ Greenwash Detector")
     txt = st.text_area("Product Claim")
     if st.button("Analyze") and txt:
-        with st.spinner("Auditing..."):
-            st.write(ask_ai(f"Analyze greenwashing: {txt}"))
-            add_xp(10, "Greenwash Check")
+        st.write(ask_ai(f"Analyze greenwashing: {txt}"))
+        add_xp(10, "Check")
 
 def render_carbon_tracker():
     st.write("")
     if st.button("⬅️ Back"): navigate_to("🏠 Home")
-    st.header("👣 Carbon Tracker")
     
-    t = st.selectbox("Transport", ["Walk/Cycle", "Car", "Bus"])
-    if st.button("Log Sustainable Action"):
+    st.header("👣 Carbon Tracker")
+    t = st.selectbox("Transport", ["Walk", "Car", "Bus"])
+    if st.button("Log Action"):
         add_xp(20, f"Transport: {t}")
         st.success("Logged!")
 
@@ -396,7 +390,6 @@ def render_carbon_tracker():
 def main():
     make_pwa_ready()
     
-    # Login Logic
     if not st.session_state.user:
         st.title("🌱 EcoWise Login")
         t1, t2 = st.tabs(["Login", "Sign Up"])
