@@ -4,3 +4,5 @@ groq
 PyPDF2
 folium
 streamlit-folium
+pandas
+plotly
