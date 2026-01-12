@@ -105,7 +105,8 @@ def analyze_image(image_bytes):
     try:
         encoded_image = base64.b64encode(image_bytes).decode('utf-8')
         completion = groq_client.chat.completions.create(
-            model="llama-3.2-90b-vision-preview", # <--- UPDATED TO NEW MODEL
+            # UPDATED MODEL HERE
+            model="llama-3.2-90b-vision-preview", 
             messages=[
                 {
                     "role": "user",
@@ -201,6 +202,7 @@ def render_home():
     
     col1, col2 = st.columns(2)
     with col1:
+        # FIXED: Removed on_click, using direct if logic
         if st.button("📸 Visual Sorter", use_container_width=True): navigate_to("📸 Visual Sorter")
         if st.button("🎙️ Voice Mode", use_container_width=True): navigate_to("🎙️ Voice Mode")
         if st.button("♻️ Recycle Assistant", use_container_width=True): navigate_to("♻️ Recycle Assistant")
@@ -271,7 +273,6 @@ def render_map():
     # 2. Display Map
     points = supabase.table("map_points").select("*").execute().data
     
-    # Center map on first point or default (India)
     start_loc = [points[0]['latitude'], points[0]['longitude']] if points else [20.5937, 78.9629]
     m = folium.Map(location=start_loc, zoom_start=10)
     
@@ -327,24 +328,18 @@ def render_analytics():
     if st.button("⬅️ Back"): navigate_to("🏠 Home")
     st.header("📊 Green Analytics")
     
-    # Fetch Data
     logs = supabase.table("study_logs").select("*").execute().data
     
     if logs:
         df = pd.DataFrame(logs)
-        
-        # 1. Total Impact
-        total_points = df['minutes'].sum() # Reusing minutes column for points
+        total_points = df['minutes'].sum()
         st.metric("Total Community Green Points", total_points)
         
-        # 2. Activity Distribution
         st.subheader("Most Popular Eco-Activities")
         chart_data = df['activity_type'].value_counts()
         st.bar_chart(chart_data)
         
-        # 3. Timeline
         st.subheader("Community Activity Over Time")
-        # Ensure date is datetime
         df['date'] = pd.to_datetime(df['date'])
         daily_activity = df.groupby('date')['minutes'].sum()
         st.line_chart(daily_activity)
