@@ -112,6 +112,7 @@ def analyze_image_with_hf(image_bytes):
     Uses Hugging Face (Salesforce BLIP) to identify the image content.
     Then sends that content to Groq for recycling advice.
     """
+    # Using Salesforce BLIP model which is excellent for describing images
     API_URL = "https://api-inference.huggingface.co/models/Salesforce/blip-image-captioning-large"
     headers = {"Authorization": f"Bearer {HF_TOKEN}"}
 
@@ -119,10 +120,14 @@ def analyze_image_with_hf(image_bytes):
         # 1. Ask Hugging Face: "What is in this picture?"
         response = requests.post(API_URL, headers=headers, data=image_bytes)
         
+        # Check for model loading error (common with free tier)
+        if response.status_code == 503:
+            return "HF_LOADING"
+            
         if response.status_code != 200:
-            return "HF_ERROR"
+            return f"HF_ERROR: {response.status_code}"
 
-        # Output format is usually: [{'generated_text': 'a close up of a bottle'}]
+        # Output format is: [{'generated_text': 'a close up of a bottle'}]
         prediction = response.json()
         
         if isinstance(prediction, list) and 'generated_text' in prediction[0]:
@@ -131,17 +136,16 @@ def analyze_image_with_hf(image_bytes):
             # 2. Ask Groq: "How do I recycle [item_description]?"
             advice = ask_groq(
                 f"I have an item that looks like '{item_description}'. "
-                f"1. Identify specifically what it likely is (e.g. plastic bottle, cardboard). "
+                f"1. Identify specifically what it likely is. "
                 f"2. Is it recyclable? "
                 f"3. How should I dispose of it? Be brief."
             )
-            return f"**Detected:** {item_description}\n\n{advice}"
+            return f"**Detected:** {item_description.title()}\n\n{advice}"
         else:
             return "HF_ERROR"
 
     except Exception as e:
-        print(e)
-        return "HF_ERROR"
+        return f"HF_ERROR: {str(e)}"
 
 def transcribe_audio(audio_bytes):
     try:
@@ -247,7 +251,7 @@ def render_visual_sorter():
     st.write(""); 
     if st.button("⬅️ Back"): navigate_to("🏠 Home")
     st.header("📸 AI Visual Waste Sorter")
-    st.info("Identify trash instantly using AI.")
+    st.info("Identify trash instantly using Hugging Face Vision.")
     
     # Tabs for Camera or Upload
     tab1, tab2 = st.tabs(["📸 Live Camera", "📂 Gallery Upload"])
@@ -266,12 +270,17 @@ def render_visual_sorter():
         with st.spinner("Analyzing image..."):
             res = analyze_image_with_hf(img_data)
             
-            # Fallback if Hugging Face is busy
-            if res == "HF_ERROR":
-                st.warning("⚠️ AI Vision is busy. Please describe the item below:")
-                man = st.text_input("Item Name (e.g., Plastic Bottle)")
+            # Handle Errors
+            if "HF_ERROR" in res:
+                st.error("Vision AI Error. Please check your HF Token or try again.")
+                st.warning("⚠️ Manual Override:")
+                man = st.text_input("Describe the item (e.g., Plastic Bottle)")
                 if man and st.button("Check Manual"):
                     st.markdown(ask_groq(f"How to recycle: {man}"))
+                    
+            elif "HF_LOADING" in res:
+                st.info("⌛ Model is loading (Cold Start)... Please click 'Take picture' again in 20 seconds.")
+                
             else:
                 st.success("✅ Analysis Complete!")
                 st.markdown(res)
