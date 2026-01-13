@@ -89,7 +89,7 @@ def navigate_to(page):
     st.rerun()
 
 # ==========================================
-# 3. AI FUNCTIONS (ROBUST VERSION)
+# 3. AI FUNCTIONS
 # ==========================================
 
 def ask_ai(prompt, system_role="You are a helpful Sustainability Expert."):
@@ -110,39 +110,26 @@ def ask_ai(prompt, system_role="You are a helpful Sustainability Expert."):
 
 def analyze_image(image_bytes):
     """
-    Tries multiple Gemini models to prevent 404/Decommissioned errors.
+    Uses Google Gemini 1.5 Flash.
     """
     try:
-        # Convert bytes to PIL Image
+        # 1. Convert bytes to PIL Image (Required for Gemini)
         image = PIL.Image.open(io.BytesIO(image_bytes))
         
-        # LIST OF MODELS TO TRY (In order of preference)
-        # This fixes the "Model Not Found" error by trying alternatives
-        models_to_try = [
-            'gemini-1.5-flash',
-            'gemini-1.5-flash-001',
-            'gemini-1.5-pro',
-            'gemini-pro-vision'
-        ]
+        # 2. Call Gemini Flash
+        # We use 'gemini-1.5-flash' which is the current stable vision model
+        model = genai.GenerativeModel('gemini-1.5-flash')
         
-        last_error = ""
-        
-        for model_name in models_to_try:
-            try:
-                model = genai.GenerativeModel(model_name)
-                response = model.generate_content([
-                    "Identify this object. Is it recyclable, compostable, or trash? Be brief and give strict disposal instructions.", 
-                    image
-                ])
-                return response.text
-            except Exception as e:
-                last_error = str(e)
-                continue # Try the next model in the list
-        
-        return f"Vision Error: Could not connect to any Google Model. Last error: {last_error}"
-
+        response = model.generate_content([
+            "Identify this object exactly. Is it recyclable, compostable, or trash? Be brief and give strict disposal instructions.", 
+            image
+        ])
+        return response.text
     except Exception as e:
-        return f"Image Error: {str(e)}"
+        # Specific error handling for Model Not Found
+        if "404" in str(e):
+            return "API Error: Model 'gemini-1.5-flash' not found. Please check your API Key permissions or Region."
+        return f"Vision Error: {str(e)}"
 
 def transcribe_audio(audio_bytes):
     try:
@@ -208,16 +195,13 @@ def render_home():
     st.write("") 
     st.title(f"🌍 EcoWise Dashboard")
     
-    # Metrics
     c1, c2, c3 = st.columns(3)
     c1.metric("🌱 Points", st.session_state.xp)
     c2.metric("🔥 Streak", f"{st.session_state.streak} Days")
-    rank = "Eco-Warrior" if st.session_state.xp > 500 else "Rookie"
-    c3.metric("🏆 Rank", rank)
+    c3.metric("🏆 Rank", "Eco-Warrior" if st.session_state.xp > 500 else "Rookie")
     
     st.divider()
     
-    # Quick Actions
     st.subheader("🚀 Quick Actions")
     col1, col2 = st.columns(2)
     with col1:
@@ -231,7 +215,6 @@ def render_home():
         if st.button("🗺️ Eco-Map", use_container_width=True): navigate_to("🗺️ Eco-Map")
         if st.button("👣 Carbon Tracker", use_container_width=True): navigate_to("👣 Carbon Tracker")
 
-    # Daily Challenges
     st.divider()
     st.subheader("🎯 Daily Green Challenges")
     
@@ -254,28 +237,19 @@ def render_visual_sorter():
     st.header("📸 AI Visual Waste Sorter")
     st.info("Identify trash instantly using Google Gemini Vision.")
     
-    # Tabs for Camera or Upload
-    tab1, tab2 = st.tabs(["📸 Live Camera", "📂 Gallery Upload"])
+    # Simple Camera Input
     img_data = None
-
-    with tab1:
-        cam_img = st.camera_input("Take a picture")
-        if cam_img: img_data = cam_img.getvalue()
-    
-    with tab2:
-        up_img = st.file_uploader("Upload Image", type=['jpg','png','jpeg'])
-        if up_img: 
-            img_data = up_img.getvalue()
-            st.image(img_data, caption="Uploaded Image", use_container_width=True)
+    cam_img = st.camera_input("Take a picture")
+    if cam_img: img_data = cam_img.getvalue()
 
     if img_data:
         with st.spinner("Analyzing with Gemini Vision..."):
             res = analyze_image(img_data)
-            if "Vision Error" in res:
+            if "Vision Error" in res or "API Error" in res:
                 st.error(res)
                 # Manual Fallback
-                st.warning("⚠️ Try describing the item if the image fails.")
-                man = st.text_input("Item Name")
+                st.warning("⚠️ Vision failed. Please describe the item.")
+                man = st.text_input("Item Name (e.g., Plastic Bottle)")
                 if man and st.button("Check Manual"):
                     st.markdown(ask_ai(f"How to recycle: {man}"))
             else:
