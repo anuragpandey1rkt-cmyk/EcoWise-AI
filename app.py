@@ -44,6 +44,50 @@ def make_pwa_ready():
         </style>
     """, unsafe_allow_html=True)
 
+def apply_mobile_styles():
+    st.markdown("""
+        <style>
+            /* Hide Streamlit Elements */
+            #MainMenu {visibility: hidden;}
+            footer {visibility: hidden;}
+            header {visibility: hidden;}
+            
+            /* Mobile App Container */
+            div.block-container {
+                padding-top: 2rem;
+                padding-bottom: 5rem;
+                max-width: 800px; /* Force mobile width feeling on desktop */
+                margin: auto;
+            }
+            
+            /* App-like Buttons */
+            div.stButton > button {
+                width: 100%;
+                border-radius: 12px;
+                height: 3.5rem;
+                font-weight: bold;
+                border: none;
+                box-shadow: 0px 4px 6px rgba(0,0,0,0.1);
+                transition: all 0.2s;
+            }
+            div.stButton > button:active {
+                transform: scale(0.98);
+            }
+            
+            /* Card Styling for Metrics */
+            div[data-testid="stMetric"] {
+                background-color: #f0f2f6;
+                padding: 10px;
+                border-radius: 10px;
+                text-align: center;
+            }
+        </style>
+        
+        <meta name="apple-mobile-web-app-capable" content="yes">
+        <meta name="mobile-web-app-capable" content="yes">
+        <meta name="theme-color" content="#00CC66">
+    """, unsafe_allow_html=True)
+    
 # ==========================================
 # 2. LOAD SECRETS & CLIENTS
 # ==========================================
@@ -222,12 +266,14 @@ def add_xp(amount, activity_name):
 def render_home():
     st.write("") 
     st.title(f"🌍 EcoWise Dashboard")
+    # 1. Dashboard Metrics
     c1, c2, c3 = st.columns(3)
     c1.metric("🌱 Points", st.session_state.xp)
     c2.metric("🔥 Streak", f"{st.session_state.streak} Days")
     c3.metric("🏆 Rank", "Eco-Warrior")
     
     st.divider()
+    # 2. Action Grid
     st.subheader("🚀 Quick Actions")
     col1, col2 = st.columns(2)
     with col1:
@@ -552,8 +598,8 @@ def render_virtual_forest():
 # 6. MAIN APP LOOP
 # ==========================================
 def main():
-    make_pwa_ready()
-    
+    #make_pwa_ready()
+    apply_mobile_styles()
     if not st.session_state.user:
         st.title("🌱 EcoWise Login")
         t1, t2 = st.tabs(["Login", "Sign Up"])
@@ -577,7 +623,7 @@ def main():
                         st.success("Created! Login now.")
                 except Exception as err: st.error(str(err))
         return
-
+    # Sidebar Navigation
     with st.sidebar:
         st.title("EcoWise AI")
         st.write(f"👤 {st.session_state.user.email}")
@@ -597,7 +643,7 @@ def main():
             supabase.auth.sign_out()
             st.session_state.clear()
             st.rerun()
-
+    # Routing
     f = st.session_state.feature
     if f == "🏠 Home": render_home()
     elif f == "📸 Visual Sorter": render_visual_sorter()
