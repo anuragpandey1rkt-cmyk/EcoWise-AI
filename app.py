@@ -89,7 +89,7 @@ def navigate_to(page):
     st.rerun()
 
 # ==========================================
-# 3. AI FUNCTIONS (BRUTE FORCE VERSION)
+# 3. AI FUNCTIONS
 # ==========================================
 
 def ask_ai(prompt, system_role="You are a helpful Sustainability Expert."):
@@ -110,40 +110,23 @@ def ask_ai(prompt, system_role="You are a helpful Sustainability Expert."):
 
 def analyze_image(image_bytes):
     """
-    BRUTE FORCE METHOD:
-    Tries every known Gemini Vision model until one works.
+    Tries Gemini Flash. If it fails, returns MANUAL_FALLBACK signal.
     """
     try:
         image = PIL.Image.open(io.BytesIO(image_bytes))
         
-        # List of models to try in order
-        models = [
-            'gemini-1.5-flash',
-            'gemini-1.5-flash-latest',
-            'models/gemini-1.5-flash',
-            'gemini-1.5-pro',
-            'gemini-pro-vision'
-        ]
+        # Use the standard model name
+        model = genai.GenerativeModel('gemini-1.5-flash')
         
-        last_error = ""
-        
-        for model_name in models:
-            try:
-                model = genai.GenerativeModel(model_name)
-                response = model.generate_content([
-                    "Identify this object exactly. Is it recyclable, compostable, or trash? Be brief and give strict disposal instructions.", 
-                    image
-                ])
-                return response.text # If successful, return immediately
-            except Exception as e:
-                last_error = str(e)
-                continue # If fail, try next model
-        
-        # If all fail, return debug info
-        return f"All models failed. Last Error: {last_error}"
-
+        response = model.generate_content([
+            "Identify this object exactly. Is it recyclable, compostable, or trash? Be brief and give strict disposal instructions.", 
+            image
+        ])
+        return response.text
     except Exception as e:
-        return f"Image Error: {str(e)}"
+        # If API fails, return special code to trigger manual input UI
+        print(f"Vision API Failed: {e}") # Log to console
+        return "MANUAL_FALLBACK"
 
 def transcribe_audio(audio_bytes):
     try:
@@ -249,7 +232,7 @@ def render_visual_sorter():
     st.write(""); 
     if st.button("⬅️ Back"): navigate_to("🏠 Home")
     st.header("📸 AI Visual Waste Sorter")
-    st.info("Identify trash instantly using Google Gemini Vision.")
+    st.info("Identify trash instantly using AI.")
     
     # Simple Camera Input
     img_data = None
@@ -257,15 +240,27 @@ def render_visual_sorter():
     if cam_img: img_data = cam_img.getvalue()
 
     if img_data:
-        with st.spinner("Analyzing with Gemini Vision..."):
+        with st.spinner("Analyzing image..."):
+            # Try to analyze
             res = analyze_image(img_data)
-            if "Vision Error" in res or "API Error" in res or "All models failed" in res:
-                st.error(res)
-                st.warning("⚠️ Vision failed. Please describe the item.")
-                man = st.text_input("Item Name (e.g., Plastic Bottle)")
-                if man and st.button("Check Manual"):
-                    st.markdown(ask_ai(f"How to recycle: {man}"))
+            
+            # CHECK IF API FAILED
+            if res == "MANUAL_FALLBACK":
+                st.warning("⚠️ AI Vision is busy. Please describe the item manually below.")
+                
+                # Show Text Input immediately if Vision fails
+                item_name = st.text_input("What is this item? (e.g. 'Steel Bottle')", key="fail_fix")
+                
+                if item_name and st.button("Get Instructions"):
+                    with st.spinner("Checking database..."):
+                        # Use Groq (Text AI) as reliable fallback
+                        text_res = ask_ai(f"How do I recycle a {item_name}? Be strict.")
+                        st.success(f"Instructions for: {item_name}")
+                        st.markdown(text_res)
+                        add_xp(15, "Manual Scan (Fallback)")
+            
             else:
+                # SUCCESS
                 st.success("✅ Analysis Complete!")
                 st.markdown(res)
                 add_xp(15, "Visual Scan")
