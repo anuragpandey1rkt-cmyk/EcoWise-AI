@@ -13,8 +13,9 @@ from streamlit_folium import st_folium
 import requests
 from PIL import Image
 import io
-import cv2 # OpenCV
+import cv2
 import numpy as np
+import google.generativeai as genai
 
 # ==========================================
 # 1. CONFIGURATION & INIT
@@ -49,6 +50,8 @@ try:
     SUPABASE_URL = st.secrets["SUPABASE_URL"]
     SUPABASE_KEY = st.secrets["SUPABASE_ANON_KEY"]
     GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
+    # Safely load Gemini Key
+    GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", "")
 except FileNotFoundError:
     st.error("Secrets not found. Please set up .streamlit/secrets.toml")
     st.stop()
@@ -58,12 +61,14 @@ except FileNotFoundError:
 def init_clients():
     supa = create_client(SUPABASE_URL, SUPABASE_KEY)
     groq = Groq(api_key=GROQ_API_KEY)
+    if GEMINI_API_KEY:
+        genai.configure(api_key=GEMINI_API_KEY)
     return supa, groq
 
 supabase, groq_client = init_clients()
 
 # ==========================================
-# 2. SESSION STATE
+# 2. SESSION STATE & NAVIGATION
 # ==========================================
 def init_session_state():
     defaults = {
@@ -88,72 +93,80 @@ def navigate_to(page):
     st.rerun()
 
 # ==========================================
-# 3. ADVANCED OPENCV ENGINE (LOCAL AI)
+# 3. HYBRID VISION ENGINE (OpenCV + Gemini)
 # ==========================================
 
-def get_dominant_color(image_array):
+def get_opencv_metrics(image_bytes):
     """
-    Scans the image to find the main color (Green, Brown, Blue, etc.)
-    Used to guess material (Cardboard, Glass, Plastic).
-    """
-    # Resize for speed
-    img = cv2.resize(image_array, (50, 50))
-    avg_color_per_row = np.average(img, axis=0)
-    avg_color = np.average(avg_color_per_row, axis=0) # B, G, R
-    
-    blue, green, red = avg_color
-    
-    # Simple Color Heuristics
-    if red > 150 and green > 150 and blue > 150: return "White/Light (Paper/Plastic)"
-    if red > 100 and green > 100 and blue < 100: return "Yellow (Organic/Peel)"
-    if green > red and green > blue: return "Green (Glass/Organic)"
-    if blue > red and blue > green: return "Blue (Plastic/Wrapper)"
-    if red > 100 and green < 80 and blue < 80: return "Red (Hazardous/Plastic)"
-    if red > 100 and green > 80 and blue < 60: return "Brown (Cardboard/Organic)"
-    return "Dark/Mixed"
-
-def analyze_with_opencv(image_bytes):
-    """
-    Performs Computer Vision Analysis:
-    1. Edge Detection (Canny)
-    2. Contour Analysis (Shape Detection)
-    3. Color Analysis (Material Guess)
+    Extracts technical data using OpenCV:
+    1. Sharpness (Laplacian Variance)
+    2. Dominant Color (K-Means simplified)
     """
     # Convert bytes to numpy array
     file_bytes = np.asarray(bytearray(image_bytes), dtype=np.uint8)
-    image = cv2.imdecode(file_bytes, 1)
+    img = cv2.imdecode(file_bytes, 1)
     
-    # 1. Image Quality Check (Blurry?)
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    # 1. Calculate Sharpness
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     laplacian_var = cv2.Laplacian(gray, cv2.CV_64F).var()
+    sharpness_score = f"{int(laplacian_var)} (Blurry)" if laplacian_var < 100 else f"{int(laplacian_var)} (Sharp)"
     
-    # 2. Shape Detection (Aspect Ratio)
-    edges = cv2.Canny(gray, 50, 150)
-    contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    # 2. Dominant Color
+    avg_color_per_row = np.average(img, axis=0)
+    avg_color = np.average(avg_color_per_row, axis=0)
+    b, g, r = avg_color
     
-    shape_guess = "Unknown"
-    if contours:
-        # Find largest contour
-        largest = max(contours, key=cv2.contourArea)
-        x, y, w, h = cv2.boundingRect(largest)
-        aspect_ratio = float(h) / w
-        
-        if aspect_ratio > 1.5: shape_guess = "Tall/Cylindrical (Bottle/Can)"
-        elif aspect_ratio < 0.8: shape_guess = "Wide/Flat (Box/Tray)"
-        else: shape_guess = "Square/Round (Container/Fruit)"
-        
-    # 3. Color Analysis
-    color_desc = get_dominant_color(image)
+    color_name = "Mixed"
+    if r > 150 and g > 150 and b > 150: color_name = "White/Light"
+    elif r < 50 and g < 50 and b < 50: color_name = "Black/Dark"
+    elif g > r and g > b: color_name = "Green (Glass/Organic?)"
+    elif b > r and b > g: color_name = "Blue (Plastic?)"
+    elif r > 150 and g > 100 and b < 50: color_name = "Brown (Cardboard?)"
     
-    # 4. Generate Report
-    report = (
-        f"**Computer Vision Analysis:**\n"
-        f"- **Shape:** {shape_guess}\n"
-        f"- **Dominant Color:** {color_desc}\n"
-        f"- **Image Sharpness:** {int(laplacian_var)}\n\n"
-        f"Based on visual features, please confirm the item below to get recycling rules."
-    )
-    return report, shape_guess, color_desc
+    return sharpness_score, color_name
+
+def analyze_smart_hybrid(image_bytes):
+    """
+    The 'Best Project' Feature:
+    Combines OpenCV Metrics + Gemini AI Understanding.
+    """
+    # Step 1: Run OpenCV Locally
+    sharpness, color_hint = get_opencv_metrics(image_bytes)
+    
+    # Step 2: Run Gemini AI (The Brain)
+    if GEMINI_API_KEY:
+        try:
+            image_pil = Image.open(io.BytesIO(image_bytes))
+            model = genai.GenerativeModel('gemini-1.5-flash')
+            
+            # Smart Prompt: Ask AI to verify OpenCV's findings
+            prompt = (
+                f"I have processed this image with OpenCV. "
+                f"It detected color dominance: '{color_hint}'. "
+                f"Now, as an advanced AI, strictly identify the object name. "
+                f"Then provide: 1. Is it Recyclable? 2. Preparation steps (e.g. wash it). 3. Which bin? "
+                f"Format as clear markdown."
+            )
+            
+            response = model.generate_content([prompt, image_pil])
+            ai_text = response.text
+            
+            # Combine into a Technical Report
+            final_report = (
+                f"### 🧬 Smart Vision Analysis\n"
+                f"**Technical Metrics (OpenCV):**\n"
+                f"* **Sharpness Score:** {sharpness}\n"
+                f"* **Spectral Color:** {color_hint}\n"
+                f"---\n"
+                f"**AI Identification (Gemini):**\n"
+                f"{ai_text}"
+            )
+            return "SUCCESS", final_report
+            
+        except Exception as e:
+            return "AI_ERROR", str(e)
+            
+    return "NO_KEY", "Gemini API Key missing."
 
 def ask_groq(prompt, system_role="You are a helpful Sustainability Expert."):
     try:
@@ -173,7 +186,6 @@ def ask_groq(prompt, system_role="You are a helpful Sustainability Expert."):
 # ==========================================
 # 4. HELPERS
 # ==========================================
-
 def transcribe_audio(audio_bytes):
     try:
         transcription = groq_client.audio.transcriptions.create(
@@ -204,7 +216,6 @@ def sync_user_stats(user_id):
             stats = data.data[0]
             st.session_state.xp = stats.get('xp', 0)
             st.session_state.streak = stats.get('streak', 0)
-            st.session_state.last_action_date = stats.get('last_study_date')
         else:
             supabase.table("user_stats").insert({"user_id": user_id, "xp": 0, "streak": 0}).execute()
     except: pass
@@ -228,10 +239,10 @@ def add_xp(amount, activity_name):
 def render_visual_sorter():
     st.write(""); 
     if st.button("⬅️ Back"): navigate_to("🏠 Home")
-    st.header("📸 OpenCV Waste Sorter")
-    st.info("Using Computer Vision (Edge & Color Detection) to analyze items locally.")
+    st.header("📸 Hybrid AI Waste Sorter")
+    st.info("Combines **OpenCV** (Mathematical Analysis) with **Google Gemini** (Semantic Recognition).")
     
-    # Tabs for Camera or Upload
+    # Tabs
     tab1, tab2 = st.tabs(["📸 Live Camera", "📂 Gallery Upload"])
     img_data = None
 
@@ -245,37 +256,23 @@ def render_visual_sorter():
             st.image(img_data, width=300)
 
     if img_data:
-        with st.spinner("Processing with OpenCV..."):
-            # 1. RUN OPENCV LOCAL ANALYSIS
-            report, shape, color = analyze_with_opencv(img_data)
-            st.success("✅ OpenCV Analysis Complete!")
+        with st.spinner("Running Hybrid Analysis (OpenCV + Gemini)..."):
+            status, result = analyze_smart_hybrid(img_data)
             
-            # 2. SHOW TECHNICAL DATA (Looks impressive)
-            c1, c2 = st.columns(2)
-            c1.info(f"📐 Shape: {shape}")
-            c2.info(f"🎨 Color: {color}")
-            
-            # 3. CONFIRMATION (Since OpenCV can't know 'Brand Name')
-            st.write("Confirm item to get recycling rules:")
-            
-            # Pre-fill guess based on OpenCV data
-            guess = ""
-            if "Bottle" in shape: guess = "Plastic Bottle"
-            elif "Box" in shape: guess = "Cardboard Box"
-            elif "Brown" in color: guess = "Cardboard"
-            elif "Green" in color: guess = "Glass Bottle"
-            
-            item_name = st.text_input("Item Name:", value=guess)
-            
-            if st.button("♻️ Get Disposal Instructions"):
-                with st.spinner("Consulting Database..."):
-                    # Use Groq for the logic part
-                    prompt = f"How do I recycle a '{item_name}'? It is {shape} and {color}. Be strict."
-                    advice = ask_groq(prompt)
-                    st.markdown(f"### 📋 Instructions for {item_name}")
-                    st.markdown(advice)
-                    add_xp(20, "OpenCV Scan")
+            if status == "SUCCESS":
+                st.success("✅ Analysis Complete!")
+                st.markdown(result)
+                add_xp(20, "Hybrid Scan")
+            else:
+                st.error(f"⚠️ AI Connection Issue: {result}")
+                st.warning("Switching to Manual Mode.")
+                
+                # Manual Fallback
+                man = st.text_input("Describe item:", key="fail_fix")
+                if man and st.button("Get Rules"):
+                    st.markdown(ask_groq(f"How to recycle {man}?"))
 
+# --- STANDARD RENDERERS ---
 def render_home():
     st.write(""); st.title(f"🌍 EcoWise Dashboard")
     c1, c2, c3 = st.columns(3)
@@ -283,20 +280,22 @@ def render_home():
     c2.metric("🔥 Streak", f"{st.session_state.streak} Days")
     c3.metric("🏆 Rank", "Eco-Warrior")
     st.divider()
+    
     st.subheader("🚀 Quick Actions")
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("📸 Visual Sorter (OpenCV)", use_container_width=True): navigate_to("📸 Visual Sorter")
+        if st.button("📸 Visual Sorter (Hybrid)", use_container_width=True): navigate_to("📸 Visual Sorter")
         if st.button("🎙️ Voice Mode", use_container_width=True): navigate_to("🎙️ Voice Mode")
-    with col2:
         if st.button("♻️ Recycle Assistant", use_container_width=True): navigate_to("♻️ Recycle Assistant")
+    with col2:
+        if st.button("🛒 Campus Swap", use_container_width=True): navigate_to("🛒 Campus Swap")
+        if st.button("📊 Leaderboard", use_container_width=True): navigate_to("📊 Leaderboard")
         if st.button("🗺️ Eco-Map", use_container_width=True): navigate_to("🗺️ Eco-Map")
     
     st.divider()
     st.subheader("🎯 Daily Challenges")
-    if st.button("✅ Refused Plastic (+20)"): add_xp(20, "Challenge"); st.balloons()
+    if st.button("✅ Used Refill Bottle (+20)"): add_xp(20, "Challenge"); st.balloons()
 
-# --- OTHER RENDERERS (Standard) ---
 def render_voice_mode():
     st.write(""); st.button("⬅️ Back", on_click=navigate_to, args=("🏠 Home",))
     st.header("🎙️ Voice Assistant")
@@ -304,19 +303,29 @@ def render_voice_mode():
     if audio:
         txt = transcribe_audio(audio)
         st.write(f"You: {txt}")
-        st.write(ask_groq(txt))
+        st.markdown(ask_groq(txt))
         add_xp(10, "Voice")
 
 def render_recycle_assistant():
     st.write(""); st.button("⬅️ Back", on_click=navigate_to, args=("🏠 Home",))
     st.header("♻️ Chat Assistant")
     q = st.chat_input("Ask...")
-    if q: st.write(ask_groq(q))
+    if q: st.markdown(ask_groq(q))
 
 def render_map():
     st.write(""); st.button("⬅️ Back", on_click=navigate_to, args=("🏠 Home",))
     st.header("🗺️ Eco-Map")
     st_folium(folium.Map([20.5, 78.9], zoom_start=5), height=400)
+
+def render_marketplace():
+    st.write(""); st.button("⬅️ Back", on_click=navigate_to, args=("🏠 Home",))
+    st.header("🛒 Campus Swap")
+    st.info("Marketplace under maintenance.")
+
+def render_leaderboard():
+    st.write(""); st.button("⬅️ Back", on_click=navigate_to, args=("🏠 Home",))
+    st.header("🏆 Leaderboard")
+    st.info("Loading global stats...")
 
 # ==========================================
 # 6. MAIN APP
@@ -348,6 +357,8 @@ def main():
     elif st.session_state.feature == "🎙️ Voice Mode": render_voice_mode()
     elif st.session_state.feature == "♻️ Recycle Assistant": render_recycle_assistant()
     elif st.session_state.feature == "🗺️ Eco-Map": render_map()
+    elif st.session_state.feature == "🛒 Campus Swap": render_marketplace()
+    elif st.session_state.feature == "📊 Leaderboard": render_leaderboard()
 
 if __name__ == "__main__":
     main()
