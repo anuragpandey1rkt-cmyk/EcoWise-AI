@@ -106,17 +106,24 @@ def ask_ai(prompt, system_role="You are a helpful Sustainability Expert."):
     except Exception as e:
         return f"AI Error: {str(e)}"
 
+# ==========================================
+# PASTE THIS TO REPLACE 'analyze_image'
+# ==========================================
 def analyze_image(image_bytes):
-    """Uses Llama 3.2 Vision (Safely)"""
+    """
+    Robust Vision Handler.
+    Returns "VISION_ERROR" if the model is down so the UI knows to switch to manual mode.
+    """
     try:
         encoded_image = base64.b64encode(image_bytes).decode('utf-8')
         completion = groq_client.chat.completions.create(
-            model="llama-3.2-11b-vision-preview",
+            # We try the 90b model first (usually better), but handle failure gracefully
+            model="llama-3.2-90b-vision-preview",
             messages=[
                 {
                     "role": "user",
                     "content": [
-                        {"type": "text", "text": "Analyze this image. 1. Identify the item. 2. Is it recyclable/compostable? 3. Any Greenwashing signs? Be brief."},
+                        {"type": "text", "text": "Identify this object. Is it recyclable, compostable, or trash? Be brief and give strict disposal instructions."},
                         {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{encoded_image}"}}
                     ]
                 }
@@ -126,8 +133,12 @@ def analyze_image(image_bytes):
         )
         return completion.choices[0].message.content
     except Exception as e:
-        if "model_decommissioned" in str(e) or "400" in str(e): return "MODEL_ERROR"
-        return f"Vision Error: {str(e)}"
+        # Check if the error is specifically because the model is gone/decommissioned
+        error_str = str(e).lower()
+        if "model_decommissioned" in error_str or "not found" in error_str or "400" in error_str:
+            return "VISION_ERROR"
+        return f"Error: {str(e)}"
+
 
 def transcribe_audio(audio_bytes):
     try:
@@ -233,25 +244,47 @@ def render_home():
             add_xp(20, f"Challenge: {task}")
             st.balloons()
 
+
+# ==========================================
+# PASTE THIS TO REPLACE 'render_visual_sorter'
+# ==========================================
 def render_visual_sorter():
     st.write(""); 
     if st.button("⬅️ Back"): navigate_to("🏠 Home")
+    
     st.header("📸 AI Visual Waste Sorter")
-    st.info("Take a photo of trash. AI will identify it.")
+    st.info("Take a photo of trash. If the camera AI is updating, you can type the item name.")
     
     img_file = st.camera_input("Take a picture")
+    
     if img_file:
-        with st.spinner("Analyzing..."):
+        with st.spinner("Analyzing image..."):
+            # 1. Try Vision AI
             res = analyze_image(img_file.getvalue())
-            if res == "MODEL_ERROR":
-                st.warning("⚠️ Vision Model updating. Describe item:")
-                txt = st.text_input("Item description")
-                if txt and st.button("Analyze Text"):
-                    st.write(ask_ai(f"How to recycle: {txt}"))
-            else:
-                st.success("Analysis Complete!")
+            
+            # 2. Handle Success
+            if res != "VISION_ERROR" and "Error" not in res:
+                st.success("✅ Analysis Complete!")
                 st.markdown(res)
                 add_xp(15, "Visual Scan")
+                
+            # 3. Handle Failure (Model Decommissioned)
+            else:
+                st.warning("⚠️ The AI Vision model is currently updating/offline. Please identify the item manually.")
+                
+                # Explicit instructions so user doesn't ask "What is this?"
+                item_name = st.text_input("What item is in the photo? (e.g. 'Steel Water Bottle', 'Pizza Box')", key="manual_fix")
+                
+                if item_name and st.button("Get Recycling Instructions"):
+                    # We construct a prompt that FORCES the AI to answer about the object
+                    # instead of complaining it can't see the image.
+                    prompt = f"I have a '{item_name}'. Is it recyclable? How should I dispose of it correctly?"
+                    
+                    with st.spinner("Consulting Eco-Database..."):
+                        text_response = ask_ai(prompt)
+                        st.success(f"Instructions for: {item_name}")
+                        st.markdown(text_response)
+                        add_xp(15, "Manual Scan (Fallback)")
 
 def render_voice_mode():
     st.write(""); 
