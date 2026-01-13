@@ -8,4 +8,5 @@ plotly
 pandas
 requests
 pillow
-google-generativeai>=0.8.3
+opencv-python-headless
+numpy
