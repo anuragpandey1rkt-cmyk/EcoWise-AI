@@ -248,7 +248,9 @@ def render_home():
         if st.button("👣 Carbon Tracker"): navigate_to("👣 Carbon Tracker")
 
 def render_visual_sorter():
-    if st.button("⬅️ Back"): navigate_to("🏠 Home")
+    c1, c2 = st.columns([1, 4])
+    with c1:
+        if st.button("⬅️ Back"): navigate_to("🏠 Home")
     st.header("📸 AI Waste Sorter")
     st.info("Take a photo. AI will tell you how to recycle it.")
     
@@ -276,7 +278,9 @@ def render_visual_sorter():
                 add_xp(15, "Visual Scan")
 
 def render_map():
-    if st.button("⬅️ Back"): navigate_to("🏠 Home")
+    c1, c2 = st.columns([1, 4])
+    with c1:
+        if st.button("⬅️ Back"): navigate_to("🏠 Home")
     st.header("🗺️ Interactive Eco-Map")
     st.info("👆 Click map to Pin Location (No typing needed!)")
     
@@ -309,7 +313,9 @@ def render_map():
             st.success("Pinned!"); st.rerun()
 
 def render_plastic_calculator():
-    if st.button("⬅️ Back"): navigate_to("🏠 Home")
+    c1, c2 = st.columns([1, 4])
+    with c1:
+        if st.button("⬅️ Back"): navigate_to("🏠 Home")
     st.header("🌊 Plastic Footprint Calculator")
     st.info("Calculate your yearly impact and get a reduction plan.")
     
@@ -334,7 +340,9 @@ def render_plastic_calculator():
         add_xp(20, "Plastic Audit")
 
 def render_forest():
-    if st.button("⬅️ Back"): navigate_to("🏠 Home")
+    c1, c2 = st.columns([1, 4])
+    with c1:
+        if st.button("⬅️ Back"): navigate_to("🏠 Home")
     st.header("🌳 My Virtual Forest")
     
     trees = st.session_state.xp // 100
@@ -358,7 +366,9 @@ def render_forest():
         st.text(f"{l['date']} - {l['activity_type']} (+{l['minutes']} pts)")
 
 def render_upcycling():
-    if st.button("⬅️ Back"): navigate_to("🏠 Home")
+    c1, c2 = st.columns([1, 4])
+    with c1:
+        if st.button("⬅️ Back"): navigate_to("🏠 Home")
     st.header("🎨 Trash-to-Treasure")
     item = st.text_input("I have an old...")
     if item and st.button("Get Ideas"):
@@ -366,7 +376,9 @@ def render_upcycling():
         add_xp(25, "Upcycling")
 
 def render_menu():
-    if st.button("⬅️ Back"): navigate_to("🏠 Home")
+    c1, c2 = st.columns([1, 4])
+    with c1:
+        if st.button("⬅️ Back"): navigate_to("🏠 Home")
     st.header("🥗 Low-Carbon Menu")
     c = st.selectbox("Cuisine", ["Indian", "Italian", "Mexican", "Asian"])
     if st.button("Plan Meal"):
@@ -374,7 +386,9 @@ def render_menu():
         add_xp(20, "Menu Plan")
 
 def render_voice():
-    if st.button("⬅️ Back"): navigate_to("🏠 Home")
+    c1, c2 = st.columns([1, 4])
+    with c1:
+        if st.button("⬅️ Back"): navigate_to("🏠 Home")
     st.header("🎙️ Voice Mode")
     aud = st.audio_input("Speak Question")
     if aud:
@@ -384,7 +398,9 @@ def render_voice():
         add_xp(10, "Voice Query")
 
 def render_chat():
-    if st.button("⬅️ Back"): navigate_to("🏠 Home")
+    c1, c2 = st.columns([1, 4])
+    with c1:
+        if st.button("⬅️ Back"): navigate_to("🏠 Home")
     st.header("♻️ Recycle Assistant")
     up = st.file_uploader("Upload Rules PDF", type=['pdf'])
     if up: st.session_state.waste_guidelines_text = extract_text_from_pdf(up)
@@ -393,7 +409,9 @@ def render_chat():
     add_xp(5, "Chat")
 
 def render_mistake():
-    if st.button("⬅️ Back"): navigate_to("🏠 Home")
+    c1, c2 = st.columns([1, 4])
+    with c1:
+        if st.button("⬅️ Back"): navigate_to("🏠 Home")
     st.header("❌ Mistake Explainer")
     m = st.text_input("I threw...")
     b = st.selectbox("Into...", ["Recycle Bin", "Compost", "Trash"])
@@ -402,7 +420,9 @@ def render_mistake():
         add_xp(10, "Mistake Check")
 
 def render_leaderboard():
-    if st.button("⬅️ Back"): navigate_to("🏠 Home")
+    c1, c2 = st.columns([1, 4])
+    with c1:
+        if st.button("⬅️ Back"): navigate_to("🏠 Home")
     st.header("🏆 Global Leaderboard")
     try:
         data = supabase.table("user_stats").select("*").order("xp", desc=True).limit(10).execute().data
@@ -411,12 +431,47 @@ def render_leaderboard():
     except: st.error("Unavailable")
 
 def render_carbon_tracker():
-    if st.button("⬅️ Back"): navigate_to("🏠 Home")
-    st.header("👣 Carbon Tracker")
-    t = st.selectbox("Today's Transport", ["Walk", "Bicycle", "Bus", "Car"])
-    if st.button("Log Commute"): 
-        add_xp(20, f"Transport: {t}")
-        st.success("Logged!")
+    c1, c2 = st.columns([1, 4])
+    with c1:
+        if st.button("⬅️ Back"): navigate_to("🏠 Home")
+    
+    st.header("👣 Carbon Footprint Saver")
+    st.info("Calculate how much CO₂ you saved by choosing eco-friendly transport today.")
+    
+    # 1. Inputs
+    with st.form("carbon_calc"):
+        mode = st.selectbox("How did you travel today?", ["Walk / Bicycle", "Bus / Metro / Train", "Carpool", "Electric Vehicle"])
+        hours = st.number_input("Travel Duration (Hours)", min_value=0.1, max_value=24.0, value=1.0, step=0.5)
+        
+        submitted = st.form_submit_button("🌱 Calculate Savings")
+        
+    if submitted:
+        # Savings Logic (Compared to a standard petrol car emitting ~200g CO2/km at 40km/h)
+        # Standard Car = ~8 kg CO2 per hour of driving
+        
+        savings_per_hour = 0
+        if mode == "Walk / Bicycle":
+            savings_per_hour = 8.0  # You produced 0, so you saved all 8kg
+        elif mode == "Bus / Metro / Train":
+            savings_per_hour = 5.5  # Public transport is much cleaner per person
+        elif mode == "Electric Vehicle":
+            savings_per_hour = 4.0  # cleaner, but still uses energy
+        elif mode == "Carpool":
+            savings_per_hour = 3.0  # Sharing the ride saves a portion
+            
+        total_saved = savings_per_hour * hours
+        
+        # 2. Display Results
+        st.divider()
+        c_res, c_msg = st.columns(2)
+        with c_res:
+            st.metric("CO₂ Emissions Prevented", f"{total_saved:.2f} kg", delta="Eco-Impact")
+        with c_msg:
+            st.success(f"Great job! By choosing to {mode} for {hours} hours, you prevented {total_saved:.1f} kg of carbon from entering the atmosphere.")
+            
+        # 3. Gamification
+        xp_earned = int(total_saved * 10) # 10 points per kg saved
+        add_xp(xp_earned, f"Transport: {mode}")
 
 # ==========================================
 # 6. MAIN APP LOOP
