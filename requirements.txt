@@ -1,13 +1,10 @@
 streamlit
 supabase
 groq
-PyPDF2
+google-generativeai
+requests
+Pillow
 folium
 streamlit-folium
 plotly
 pandas
-requests
-pillow
-opencv-python-headless
-numpy
-google-generativeai>=0.8.3
