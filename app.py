@@ -449,6 +449,56 @@ def render_leaderboard():
             st.dataframe(df[['User', 'xp', 'streak']], use_container_width=True)
         else: st.info("Loading...")
     except: st.error("Leaderboard unavailable.")
+        
+def render_plastic_calculator():
+    st.write(""); 
+    if st.button("⬅️ Back"): navigate_to("🏠 Home")
+    st.header("🌊 Plastic Footprint Calculator")
+    st.info("Estimate your yearly contribution to plastic pollution.")
+
+    # 1. Inputs
+    c1, c2 = st.columns(2)
+    with c1:
+        bottles = st.slider("Plastic Bottles (per week)", 0, 30, 3)
+        bags = st.slider("Plastic Bags (per week)", 0, 30, 5)
+    with c2:
+        wrappers = st.slider("Food Wrappers/Packets (per week)", 0, 50, 10)
+        cups = st.slider("Disposable Cups/Straws (per week)", 0, 20, 2)
+
+    # 2. Calculation (Approximate weights: Bottle=12g, Bag=5g, Wrapper=2g, Cup=10g)
+    weekly_grams = (bottles * 12) + (bags * 5) + (wrappers * 2) + (cups * 10)
+    yearly_kg = (weekly_grams * 52) / 1000
+
+    st.divider()
+    
+    # 3. Results
+    c_res, c_vis = st.columns([1, 2])
+    with c_res:
+        st.metric("Annual Plastic Waste", f"{yearly_kg:.2f} kg")
+    
+    with c_vis:
+        # Visual Impact
+        if yearly_kg < 2:
+            st.success("🌟 Low Impact! You are doing great.")
+        elif yearly_kg < 8:
+            st.warning("⚠️ Moderate Impact. Small changes can help.")
+        else:
+            st.error("🚨 High Impact! Immediate reduction needed.")
+            
+    # 4. AI Analysis
+    if st.button("📉 Get Reduction Strategy"):
+        with st.spinner("Analyzing your habits..."):
+            prompt = (
+                f"I generate {yearly_kg}kg of plastic waste/year. "
+                f"Weekly habits: {bottles} bottles, {bags} bags, {wrappers} wrappers. "
+                f"Give me 3 strict, specific swaps to reduce this number immediately. "
+                f"Focus on the biggest contributor."
+            )
+            strategy = ask_groq(prompt)
+            st.markdown("### 🛑 Action Plan")
+            st.markdown(strategy)
+            add_xp(20, "Plastic Audit")
+
 
 def render_carbon_tracker():
     st.write(""); 
@@ -540,7 +590,7 @@ def main():
         if st.button("🎙️ Voice Mode", use_container_width=True): navigate_to("🎙️ Voice Mode")
         if st.button("♻️ Recycle Assistant", use_container_width=True): navigate_to("♻️ Recycle Assistant")
         if st.button("🗺️ Eco-Map", use_container_width=True): navigate_to("🗺️ Eco-Map")
-        if st.button("🛒 Campus Swap", use_container_width=True): navigate_to("🛒 Campus Swap")
+        if st.button("🌊 Plastic Calculator", use_container_width=True): navigate_to("🌊 Plastic Calculator")
         if st.button("📊 Leaderboard", use_container_width=True): navigate_to("📊 Leaderboard")
         st.divider()
         if st.button("🚪 Logout"): 
@@ -558,7 +608,7 @@ def main():
     elif f == "♻️ Recycle Assistant": render_recycle_assistant()
     elif f == "❌ Mistake Explainer": render_mistake_explainer()
     elif f == "🗺️ Eco-Map": render_map()
-    elif f == "🛒 Campus Swap": render_marketplace()
+    elif f == "🌊 Plastic Calculator": render_plastic_calculator()
     elif f == "📊 Leaderboard": render_leaderboard()
     elif f == "👣 Carbon Tracker": render_carbon_tracker()
 
