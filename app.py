@@ -48,6 +48,7 @@ try:
     SUPABASE_URL = st.secrets["SUPABASE_URL"]
     SUPABASE_KEY = st.secrets["SUPABASE_ANON_KEY"]
     GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
+    # Optional Keys (Code works even if one is missing)
     GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", "")
     HF_TOKEN = st.secrets.get("HF_TOKEN", "")
 except FileNotFoundError:
@@ -60,7 +61,7 @@ def init_clients():
     supa = create_client(SUPABASE_URL, SUPABASE_KEY)
     groq = Groq(api_key=GROQ_API_KEY)
     
-    # Configure Gemini
+    # Configure Gemini if key exists
     if GEMINI_API_KEY:
         genai.configure(api_key=GEMINI_API_KEY)
         
@@ -94,7 +95,7 @@ def navigate_to(page):
     st.rerun()
 
 # ==========================================
-# 3. SMART AI ENGINE
+# 3. TRIPLE-LAYER AI ENGINE
 # ==========================================
 
 def ask_groq(prompt, system_role="You are a helpful Sustainability Expert."):
@@ -113,69 +114,59 @@ def ask_groq(prompt, system_role="You are a helpful Sustainability Expert."):
     except Exception as e:
         return f"Logic Error: {str(e)}"
 
-def get_valid_gemini_model():
+def analyze_image_final(image_bytes):
     """
-    SMART MODEL HUNTER:
-    Asks Google which models are available and picks the best one.
-    This fixes the '404 Model Not Found' error permanently.
+    TRIPLE LAYER FALLBACK SYSTEM:
+    1. Try Google Gemini (Cycle through 4 model names)
+    2. Try Hugging Face (BLIP-Base - Faster model)
+    3. Return MANUAL_FALLBACK signal
     """
-    try:
-        # 1. Try the standard ones first
-        preferred_models = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-pro-vision']
-        
-        # 2. Ask API for list of available models
-        available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-        
-        # 3. Find match
-        for pref in preferred_models:
-            for avail in available_models:
-                if pref in avail:
-                    return avail # Return the full valid name (e.g. models/gemini-1.5-flash-001)
-        
-        # 4. Fallback: Just take the first available vision model
-        if available_models:
-            return available_models[0]
-            
-        return None
-    except:
-        # Hard fallback
-        return 'gemini-1.5-flash'
-
-def analyze_image_smart(image_bytes):
     image_pil = Image.open(io.BytesIO(image_bytes))
 
-    # --- ATTEMPT 1: GOOGLE GEMINI (With Model Hunter) ---
+    # --- LAYER 1: GOOGLE GEMINI (Brute Force) ---
     if GEMINI_API_KEY:
-        try:
-            # Dynamically find a working model
-            model_name = get_valid_gemini_model()
-            if model_name:
+        # List of models to try in order. This solves the "404" issue.
+        gemini_models = [
+            "gemini-1.5-flash",
+            "gemini-1.5-flash-001",
+            "gemini-1.5-flash-latest",
+            "gemini-1.5-pro",
+            "gemini-1.5-pro-001"
+        ]
+        
+        for model_name in gemini_models:
+            try:
                 model = genai.GenerativeModel(model_name)
                 response = model.generate_content([
                     "Identify this object exactly. Is it recyclable, compostable, or trash? Be brief and give strict disposal instructions.", 
                     image_pil
                 ])
-                return response.text
-        except Exception as e:
-            print(f"Gemini Failed: {e}") 
-
-    # --- ATTEMPT 2: HUGGING FACE (Fallback) ---
+                return response.text # Success! Return immediately.
+            except Exception:
+                continue # Try next model name
+                
+    # --- LAYER 2: HUGGING FACE (Lighter Model) ---
     if HF_TOKEN:
         try:
-            API_URL = "https://api-inference.huggingface.co/models/Salesforce/blip-image-captioning-large"
+            # We use 'blip-image-captioning-base' (Smaller/Faster than Large)
+            API_URL = "https://api-inference.huggingface.co/models/Salesforce/blip-image-captioning-base"
             headers = {"Authorization": f"Bearer {HF_TOKEN}"}
-            response = requests.post(API_URL, headers=headers, data=image_bytes)
+            
+            response = requests.post(API_URL, headers=headers, data=image_bytes, timeout=8)
             
             if response.status_code == 200:
                 prediction = response.json()
                 if isinstance(prediction, list) and 'generated_text' in prediction[0]:
                     item_name = prediction[0]['generated_text']
+                    
+                    # Pass the name to Groq for the recycling advice
                     advice = ask_groq(f"How do I recycle '{item_name}'? Be strict.")
                     return f"**Detected:** {item_name.title()}\n\n{advice}"
-        except:
-            pass
+        except Exception as e:
+            print(f"HF Failed: {e}")
 
-    return "AI_CONNECTION_ERROR"
+    # --- LAYER 3: SIGNAL TO UI ---
+    return "MANUAL_FALLBACK"
 
 def transcribe_audio(audio_bytes):
     try:
@@ -256,9 +247,10 @@ def render_home():
 
     st.divider()
     st.subheader("🎯 Daily Green Challenges")
+    
     today = str(datetime.date.today())
     if st.session_state.last_challenge_date != today:
-        possible = ["Use refillable bottle", "Recycle 3 items", "Plant-based meal", "Unplug electronics"]
+        possible = ["Use refillable bottle", "Recycle 3 items", "Plant-based meal", "Unplug electronics", "Pick up litter"]
         st.session_state.daily_challenges = random.sample(possible, 3)
         st.session_state.last_challenge_date = today
 
@@ -288,14 +280,23 @@ def render_visual_sorter():
             st.image(img_data, width=300)
 
     if img_data:
-        with st.spinner("Analyzing (Auto-Selecting Best Model)..."):
-            res = analyze_image_smart(img_data)
+        with st.spinner("Analyzing (Trying Google -> Hugging Face)..."):
+            res = analyze_image_final(img_data)
             
-            if res == "AI_CONNECTION_ERROR":
-                st.error("⚠️ AI Connection Issue: Please check API Keys.")
-                man = st.text_input("Describe item manually:", key="fallback_input")
-                if man and st.button("Check Manual"):
-                    st.markdown(ask_groq(f"How to recycle: {man}"))
+            # --- INTELLIGENT FALLBACK UI ---
+            if res == "MANUAL_FALLBACK":
+                st.warning("⚠️ Vision AI is currently busy or unreachable.")
+                st.info("💡 Don't worry! You can still get points by identifying the item.")
+                
+                # Manual Input - Keeps the flow going!
+                man = st.text_input("What item is this?", key="fallback_input", placeholder="e.g. Plastic Bottle")
+                
+                if man and st.button("Get Instructions"):
+                    with st.spinner("Checking Eco-Database..."):
+                        advice = ask_groq(f"How do I recycle a {man}? Be strict.")
+                        st.success(f"Instructions for: {man}")
+                        st.markdown(advice)
+                        add_xp(15, "Manual Scan")
             else:
                 st.success("✅ Analysis Complete!")
                 st.markdown(res)
