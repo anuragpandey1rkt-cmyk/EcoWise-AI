@@ -10,8 +10,8 @@ from groq import Groq
 from PyPDF2 import PdfReader
 import folium
 from streamlit_folium import st_folium
-import google.generativeai as genai
-import PIL.Image
+import requests
+from PIL import Image
 import io
 
 # ==========================================
@@ -48,7 +48,7 @@ try:
     SUPABASE_URL = st.secrets["SUPABASE_URL"]
     SUPABASE_KEY = st.secrets["SUPABASE_ANON_KEY"]
     GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
-    GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
+    HF_TOKEN = st.secrets["HF_TOKEN"]
 except FileNotFoundError:
     st.error("Secrets not found. Please set up .streamlit/secrets.toml")
     st.stop()
@@ -58,7 +58,6 @@ except FileNotFoundError:
 def init_clients():
     supa = create_client(SUPABASE_URL, SUPABASE_KEY)
     groq = Groq(api_key=GROQ_API_KEY)
-    genai.configure(api_key=GEMINI_API_KEY)
     return supa, groq
 
 supabase, groq_client = init_clients()
@@ -89,11 +88,11 @@ def navigate_to(page):
     st.rerun()
 
 # ==========================================
-# 3. AI FUNCTIONS
+# 3. AI FUNCTIONS (TWO-BRAIN APPROACH)
 # ==========================================
 
-def ask_ai(prompt, system_role="You are a helpful Sustainability Expert."):
-    """Uses Groq (Llama 3) for fast text chat"""
+def ask_groq(prompt, system_role="You are a helpful Sustainability Expert."):
+    """Uses Groq (Llama 3) for logic and text"""
     try:
         completion = groq_client.chat.completions.create(
             model="llama-3.3-70b-versatile",
@@ -106,27 +105,43 @@ def ask_ai(prompt, system_role="You are a helpful Sustainability Expert."):
         )
         return completion.choices[0].message.content
     except Exception as e:
-        return f"AI Error: {str(e)}"
+        return f"Logic Error: {str(e)}"
 
-def analyze_image(image_bytes):
+def analyze_image_with_hf(image_bytes):
     """
-    Tries Gemini Flash. If it fails, returns MANUAL_FALLBACK signal.
+    Uses Hugging Face (Salesforce BLIP) to identify the image content.
+    Then sends that content to Groq for recycling advice.
     """
+    API_URL = "https://api-inference.huggingface.co/models/Salesforce/blip-image-captioning-large"
+    headers = {"Authorization": f"Bearer {HF_TOKEN}"}
+
     try:
-        image = PIL.Image.open(io.BytesIO(image_bytes))
+        # 1. Ask Hugging Face: "What is in this picture?"
+        response = requests.post(API_URL, headers=headers, data=image_bytes)
         
-        # Use the standard model name
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        if response.status_code != 200:
+            return "HF_ERROR"
+
+        # Output format is usually: [{'generated_text': 'a close up of a bottle'}]
+        prediction = response.json()
         
-        response = model.generate_content([
-            "Identify this object exactly. Is it recyclable, compostable, or trash? Be brief and give strict disposal instructions.", 
-            image
-        ])
-        return response.text
+        if isinstance(prediction, list) and 'generated_text' in prediction[0]:
+            item_description = prediction[0]['generated_text']
+            
+            # 2. Ask Groq: "How do I recycle [item_description]?"
+            advice = ask_groq(
+                f"I have an item that looks like '{item_description}'. "
+                f"1. Identify specifically what it likely is (e.g. plastic bottle, cardboard). "
+                f"2. Is it recyclable? "
+                f"3. How should I dispose of it? Be brief."
+            )
+            return f"**Detected:** {item_description}\n\n{advice}"
+        else:
+            return "HF_ERROR"
+
     except Exception as e:
-        # If API fails, return special code to trigger manual input UI
-        print(f"Vision API Failed: {e}") # Log to console
-        return "MANUAL_FALLBACK"
+        print(e)
+        return "HF_ERROR"
 
 def transcribe_audio(audio_bytes):
     try:
@@ -234,33 +249,30 @@ def render_visual_sorter():
     st.header("📸 AI Visual Waste Sorter")
     st.info("Identify trash instantly using AI.")
     
-    # Simple Camera Input
+    # Tabs for Camera or Upload
+    tab1, tab2 = st.tabs(["📸 Live Camera", "📂 Gallery Upload"])
     img_data = None
-    cam_img = st.camera_input("Take a picture")
-    if cam_img: img_data = cam_img.getvalue()
+
+    with tab1:
+        cam_img = st.camera_input("Take a picture")
+        if cam_img: img_data = cam_img.getvalue()
+    with tab2:
+        up_img = st.file_uploader("Upload Image", type=['jpg','jpeg','png'])
+        if up_img: 
+            img_data = up_img.getvalue()
+            st.image(img_data, width=300)
 
     if img_data:
         with st.spinner("Analyzing image..."):
-            # Try to analyze
-            res = analyze_image(img_data)
+            res = analyze_image_with_hf(img_data)
             
-            # CHECK IF API FAILED
-            if res == "MANUAL_FALLBACK":
-                st.warning("⚠️ AI Vision is busy. Please describe the item manually below.")
-                
-                # Show Text Input immediately if Vision fails
-                item_name = st.text_input("What is this item? (e.g. 'Steel Bottle')", key="fail_fix")
-                
-                if item_name and st.button("Get Instructions"):
-                    with st.spinner("Checking database..."):
-                        # Use Groq (Text AI) as reliable fallback
-                        text_res = ask_ai(f"How do I recycle a {item_name}? Be strict.")
-                        st.success(f"Instructions for: {item_name}")
-                        st.markdown(text_res)
-                        add_xp(15, "Manual Scan (Fallback)")
-            
+            # Fallback if Hugging Face is busy
+            if res == "HF_ERROR":
+                st.warning("⚠️ AI Vision is busy. Please describe the item below:")
+                man = st.text_input("Item Name (e.g., Plastic Bottle)")
+                if man and st.button("Check Manual"):
+                    st.markdown(ask_groq(f"How to recycle: {man}"))
             else:
-                # SUCCESS
                 st.success("✅ Analysis Complete!")
                 st.markdown(res)
                 add_xp(15, "Visual Scan")
@@ -276,7 +288,7 @@ def render_voice_mode():
         with st.spinner("Listening..."):
             txt = transcribe_audio(audio)
             st.write(f"**You said:** {txt}")
-            res = ask_ai(txt)
+            res = ask_groq(txt)
             st.markdown(f"**AI:** {res}")
             add_xp(10, "Voice Query")
 
@@ -295,7 +307,7 @@ def render_recycle_assistant():
     if q:
         role = "Waste Expert."
         if st.session_state.waste_guidelines_text: role += f"\nData:\n{st.session_state.waste_guidelines_text[:10000]}"
-        res = ask_ai(q, role)
+        res = ask_groq(q, role)
         st.write(res); add_xp(5, "Query")
 
 def render_mistake_explainer():
@@ -305,7 +317,7 @@ def render_mistake_explainer():
     m = st.text_input("I wrongly disposed of...")
     b = st.selectbox("Into...", ["Recycle Bin", "Compost", "Trash"])
     if st.button("Explain Impact"):
-        st.markdown(ask_ai(f"I put {m} into {b}. Explain environmental consequence."))
+        st.markdown(ask_groq(f"I put {m} into {b}. Explain environmental consequence."))
         add_xp(10, "Learning")
 
 def render_map():
