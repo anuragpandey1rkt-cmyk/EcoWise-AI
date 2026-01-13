@@ -29,7 +29,6 @@ def make_pwa_ready():
     st.markdown("""
         <meta name="apple-mobile-web-app-capable" content="yes">
         <meta name="mobile-web-app-capable" content="yes">
-        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
         <style>
             footer {visibility: hidden;}
             div.block-container {
@@ -49,7 +48,7 @@ try:
     SUPABASE_URL = st.secrets["SUPABASE_URL"]
     SUPABASE_KEY = st.secrets["SUPABASE_ANON_KEY"]
     GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
-    # We try to load both keys. If one is missing, we just skip that provider.
+    # Safely load optional keys
     GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", "")
     HF_TOKEN = st.secrets.get("HF_TOKEN", "")
 except FileNotFoundError:
@@ -62,7 +61,7 @@ def init_clients():
     supa = create_client(SUPABASE_URL, SUPABASE_KEY)
     groq = Groq(api_key=GROQ_API_KEY)
     
-    # Init Gemini if key exists
+    # Init Gemini if available
     if GEMINI_API_KEY:
         genai.configure(api_key=GEMINI_API_KEY)
         
@@ -96,7 +95,7 @@ def navigate_to(page):
     st.rerun()
 
 # ==========================================
-# 3. AI ENGINES (CASCADING FALLBACK SYSTEM)
+# 3. ROBUST AI ENGINE
 # ==========================================
 
 def ask_groq(prompt, system_role="You are a helpful Sustainability Expert."):
@@ -115,17 +114,18 @@ def ask_groq(prompt, system_role="You are a helpful Sustainability Expert."):
     except Exception as e:
         return f"Logic Error: {str(e)}"
 
-def analyze_image_robust(image_bytes):
+def analyze_image_with_retry(image_bytes):
     """
-    ATTEMPT 1: Google Gemini (Best Quality)
-    ATTEMPT 2: Hugging Face (Best Availability)
+    Robust Multi-AI System:
+    1. Try Google Gemini (Fastest)
+    2. Try Hugging Face (Reliable but sometimes cold)
+       - If HF is 'Loading' (503), it retries 3 times automatically.
     """
     image_pil = Image.open(io.BytesIO(image_bytes))
 
     # --- ATTEMPT 1: GOOGLE GEMINI ---
     if GEMINI_API_KEY:
         try:
-            # Try standard Flash model
             model = genai.GenerativeModel('gemini-1.5-flash')
             response = model.generate_content([
                 "Identify this object exactly. Is it recyclable, compostable, or trash? Be brief and give strict disposal instructions.", 
@@ -133,38 +133,49 @@ def analyze_image_robust(image_bytes):
             ])
             return response.text
         except Exception as e:
-            print(f"Gemini Failed: {e}") 
-            # If Gemini fails (404/Region), we intentionally drop to Attempt 2
-            pass 
+            print(f"Gemini Failed: {e} (Switching to Fallback)")
+            # Fallthrough to Hugging Face
 
-    # --- ATTEMPT 2: HUGGING FACE (Salesforce BLIP) ---
+    # --- ATTEMPT 2: HUGGING FACE (With Auto-Wakeup) ---
     if HF_TOKEN:
-        try:
-            API_URL = "https://api-inference.huggingface.co/models/Salesforce/blip-image-captioning-large"
-            headers = {"Authorization": f"Bearer {HF_TOKEN}"}
-            
-            # Send bytes directly
-            response = requests.post(API_URL, headers=headers, data=image_bytes)
-            
-            if response.status_code == 200:
-                prediction = response.json()
-                if isinstance(prediction, list) and 'generated_text' in prediction[0]:
-                    item_name = prediction[0]['generated_text']
+        API_URL = "https://api-inference.huggingface.co/models/Salesforce/blip-image-captioning-large"
+        headers = {"Authorization": f"Bearer {HF_TOKEN}"}
+        
+        # Retry Logic for "Model Loading" (503) errors
+        for attempt in range(3):
+            try:
+                response = requests.post(API_URL, headers=headers, data=image_bytes)
+                
+                if response.status_code == 200:
+                    # Success!
+                    prediction = response.json()
+                    if isinstance(prediction, list) and 'generated_text' in prediction[0]:
+                        item_name = prediction[0]['generated_text']
+                        
+                        # Get advice from Groq
+                        advice = ask_groq(
+                            f"I have an item that looks like '{item_name}'. "
+                            f"1. Identify specifically what it likely is. "
+                            f"2. Is it recyclable? "
+                            f"3. How should I dispose of it? Be brief."
+                        )
+                        return f"**Detected:** {item_name.title()}\n\n{advice}"
+                
+                elif response.status_code == 503:
+                    # Model is loading, wait and retry
+                    time.sleep(2)
+                    continue
+                
+                else:
+                    # Auth error or other fatal error
+                    return f"HF Error {response.status_code}. Check Token."
                     
-                    # Ask Groq for advice based on the name
-                    advice = ask_groq(
-                        f"I have an item that looks like '{item_name}'. "
-                        f"1. Identify specifically what it likely is. "
-                        f"2. Is it recyclable? "
-                        f"3. How should I dispose of it? Be brief."
-                    )
-                    return f"**Detected (via HF):** {item_name.title()}\n\n{advice}"
-        except Exception as e:
-            print(f"HF Failed: {e}")
-            pass
+            except Exception as e:
+                return f"Connection Error: {e}"
+        
+        return "HF Timed Out (Model Busy)"
 
-    # --- FINAL FAILURE ---
-    return "ALL_AI_FAILED"
+    return "NO_VALID_KEYS"
 
 def transcribe_audio(audio_bytes):
     try:
@@ -197,7 +208,6 @@ def sync_user_stats(user_id):
             stats = data.data[0]
             st.session_state.xp = stats.get('xp', 0)
             st.session_state.streak = stats.get('streak', 0)
-            st.session_state.last_action_date = stats.get('last_study_date')
         else:
             supabase.table("user_stats").insert({"user_id": user_id, "xp": 0, "streak": 0}).execute()
     except Exception as e:
@@ -213,12 +223,6 @@ def add_xp(amount, activity_name):
             "user_id": st.session_state.user_id, "minutes": amount, "activity_type": activity_name, "date": today
         }).execute()
         st.toast(f"🌱 +{amount} Green Points!", icon="🌍")
-        
-        if st.session_state.last_action_date != today:
-            new_streak = st.session_state.streak + 1
-            st.session_state.streak = new_streak
-            st.session_state.last_action_date = today
-            supabase.table("user_stats").update({"streak": new_streak, "last_study_date": today}).eq("user_id", st.session_state.user_id).execute()
     except Exception as e:
         st.error(f"Sync Error: {e}")
 
@@ -255,7 +259,7 @@ def render_home():
     
     today = str(datetime.date.today())
     if st.session_state.last_challenge_date != today:
-        possible = ["Use refillable bottle", "Recycle 3 items", "Plant-based meal", "Unplug electronics", "Pick up litter"]
+        possible = ["Use refillable bottle", "Recycle 3 items", "Plant-based meal", "Unplug electronics"]
         st.session_state.daily_challenges = random.sample(possible, 3)
         st.session_state.last_challenge_date = today
 
@@ -272,7 +276,6 @@ def render_visual_sorter():
     st.header("📸 AI Visual Waste Sorter")
     st.info("Identify trash instantly using Multi-AI Vision.")
     
-    # Tabs for Camera or Upload
     tab1, tab2 = st.tabs(["📸 Live Camera", "📂 Gallery Upload"])
     img_data = None
 
@@ -286,12 +289,17 @@ def render_visual_sorter():
             st.image(img_data, width=300)
 
     if img_data:
-        with st.spinner("Scanning with AI (Trying Google Gemini -> Hugging Face)..."):
-            res = analyze_image_robust(img_data)
+        with st.spinner("Analyzing (Retrying AI if busy)..."):
+            res = analyze_image_with_retry(img_data)
             
-            if res == "ALL_AI_FAILED":
-                st.error("⚠️ All AI services are currently unreachable.")
-                st.info("This usually means API keys are missing or Quota exceeded.")
+            if "Error" in res or "NO_VALID_KEYS" in res or "Timed Out" in res:
+                st.error(f"⚠️ {res}")
+                st.warning("Please check your API Keys in Secrets or describe item manually.")
+                
+                # FALLBACK ONLY IF AI FAILS COMPLETELY
+                man = st.text_input("Describe the item:", key="fallback_input")
+                if man and st.button("Check Manual"):
+                    st.markdown(ask_groq(f"How to recycle: {man}"))
             else:
                 st.success("✅ Analysis Complete!")
                 st.markdown(res)
