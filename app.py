@@ -16,30 +16,26 @@ import io
 import google.generativeai as genai
 
 # ==========================================
-# 1. HELPER FUNCTIONS (DEFINED FIRST TO FIX ERRORS)
+# 1. HELPER FUNCTIONS
 # ==========================================
 
 def make_pwa_ready():
-    """Styles the app to look like a mobile app"""
+    """Styles the app to look like a high-quality mobile app"""
     st.markdown("""
         <meta name="apple-mobile-web-app-capable" content="yes">
         <meta name="mobile-web-app-capable" content="yes">
         <style>
-            /* Clean up the UI but don't hide the header completely */
             footer {visibility: hidden;}
-            
-            /* Mobile-friendly container */
             div.block-container {
                 padding-top: 2rem;
                 padding-bottom: 5rem;
             }
-            
-            /* Big, touch-friendly buttons */
             div.stButton > button {
                 width: 100%;
                 border-radius: 10px;
                 height: 3rem;
                 font-weight: 600;
+                box-shadow: 0px 2px 5px rgba(0,0,0,0.1);
             }
         </style>
     """, unsafe_allow_html=True)
@@ -70,7 +66,6 @@ def navigate_to(page):
 # ==========================================
 st.set_page_config(page_title="EcoWise AI", page_icon="🌱", layout="wide")
 
-# Load Secrets safely
 try:
     SUPABASE_URL = st.secrets["SUPABASE_URL"]
     SUPABASE_KEY = st.secrets["SUPABASE_ANON_KEY"]
@@ -92,7 +87,7 @@ def init_clients():
 supabase, groq_client = init_clients()
 
 # ==========================================
-# 3. ROBUST AI LOGIC (FIXES 404 ERRORS)
+# 3. ROBUST AI LOGIC (Triple Layer)
 # ==========================================
 
 def ask_groq(prompt, system_role="You are a helpful Sustainability Expert."):
@@ -120,7 +115,7 @@ def get_best_gemini_model():
                 if 'pro' in m.name: return m.name
     except:
         pass
-    return "models/gemini-1.5-flash" # Default fallback
+    return "models/gemini-1.5-flash"
 
 def analyze_image_robust(image_bytes):
     image_pil = Image.open(io.BytesIO(image_bytes))
@@ -168,20 +163,49 @@ def extract_text_from_pdf(file):
     except: return None
 
 # ==========================================
-# 4. GAMIFICATION & SYNC
+# 4. GAMIFICATION & SYNC (FIXED STREAK LOGIC)
 # ==========================================
-def add_xp(amount, activity):
+def add_xp(amount, activity_name):
     if not st.session_state.user_id: return
+    
+    # 1. Update XP
     st.session_state.xp += amount
-    today = str(datetime.date.today())
+    today = datetime.date.today()
+    today_str = str(today)
+    
+    # 2. Update Streak (Correct Logic)
+    last_date_str = st.session_state.last_action_date
+    
+    if last_date_str != today_str:
+        if last_date_str:
+            last_date = datetime.datetime.strptime(last_date_str, "%Y-%m-%d").date()
+            delta = (today - last_date).days
+            
+            if delta == 1:
+                st.session_state.streak += 1 # Consecutive day
+            elif delta > 1:
+                st.session_state.streak = 1 # Broken streak
+            # If delta == 0 (same day), do nothing to streak
+        else:
+            st.session_state.streak = 1 # First time ever
+
+        st.session_state.last_action_date = today_str
+    
+    # 3. Sync to DB
     try:
-        supabase.table("user_stats").update({"xp": st.session_state.xp}).eq("user_id", st.session_state.user_id).execute()
-        st.toast(f"+{amount} XP!", icon="🎉")
-        if st.session_state.last_action_date != today:
-            st.session_state.streak += 1
-            st.session_state.last_action_date = today
-            supabase.table("user_stats").update({"streak": st.session_state.streak, "last_study_date": today}).eq("user_id", st.session_state.user_id).execute()
-    except: pass
+        supabase.table("user_stats").update({
+            "xp": st.session_state.xp, 
+            "streak": st.session_state.streak,
+            "last_study_date": today_str
+        }).eq("user_id", st.session_state.user_id).execute()
+        
+        supabase.table("study_logs").insert({
+            "user_id": st.session_state.user_id, "minutes": amount, "activity_type": activity_name, "date": today_str
+        }).execute()
+        
+        st.toast(f"🌱 +{amount} XP!", icon="🎉")
+    except Exception as e:
+        print(f"Sync Error: {e}")
 
 def sync_user_stats(uid):
     try:
@@ -189,15 +213,18 @@ def sync_user_stats(uid):
         if data.data:
             st.session_state.xp = data.data[0].get('xp', 0)
             st.session_state.streak = data.data[0].get('streak', 0)
+            st.session_state.last_action_date = data.data[0].get('last_study_date')
         else:
             supabase.table("user_stats").insert({"user_id": uid, "xp": 0, "streak": 0}).execute()
     except: pass
 
 # ==========================================
-# 5. FEATURE SCREENS
+# 5. FEATURE RENDERERS (ALL 12 FEATURES)
 # ==========================================
+
 def render_home():
     st.title(f"👋 Hi, Eco-Warrior")
+    
     c1, c2, c3 = st.columns(3)
     c1.metric("Points", st.session_state.xp)
     c2.metric("Streak", f"{st.session_state.streak}🔥")
@@ -209,113 +236,187 @@ def render_home():
     c1, c2 = st.columns(2)
     with c1:
         if st.button("📸 Visual Sorter"): navigate_to("📸 Visual Sorter")
-        if st.button("♻️ Chatbot"): navigate_to("♻️ Recycle Assistant")
+        if st.button("♻️ Recycling Bot"): navigate_to("♻️ Recycle Assistant")
         if st.button("🌊 Plastic Calc"): navigate_to("🌊 Plastic Calculator")
         if st.button("🎨 Upcycling"): navigate_to("🎨 Upcycling Station")
+        if st.button("🏆 Leaderboard"): navigate_to("🏆 Leaderboard")
     with c2:
         if st.button("🎙️ Voice Mode"): navigate_to("🎙️ Voice Mode")
         if st.button("🗺️ Eco-Map"): navigate_to("🗺️ Eco-Map")
         if st.button("🥗 Eco-Menu"): navigate_to("🥗 Eco-Menu Planner")
         if st.button("🌳 My Forest"): navigate_to("🌳 My Forest")
+        if st.button("👣 Carbon Tracker"): navigate_to("👣 Carbon Tracker")
 
 def render_visual_sorter():
     if st.button("⬅️ Back"): navigate_to("🏠 Home")
-    st.header("📸 AI Sorter")
-    img = st.camera_input("Take Photo")
-    if not img: img_up = st.file_uploader("Or Upload", type=['jpg','png'])
+    st.header("📸 AI Waste Sorter")
+    st.info("Take a photo. AI will tell you how to recycle it.")
     
-    final_img = img if img else (img_up if 'img_up' in locals() and img_up else None)
+    t1, t2 = st.tabs(["Camera", "Upload"])
+    img_data = None
+    with t1:
+        cam = st.camera_input("Snap Photo")
+        if cam: img_data = cam.getvalue()
+    with t2:
+        up = st.file_uploader("Or Upload", type=['jpg','png','jpeg'])
+        if up: img_data = up.getvalue(); st.image(img_data, width=200)
 
-    if final_img:
+    if img_data:
         with st.spinner("Analyzing..."):
-            res = analyze_image_robust(final_img.getvalue())
+            res = analyze_image_robust(img_data)
             if res == "MANUAL_FALLBACK":
                 st.warning("⚠️ AI busy. Type item name:")
                 man = st.text_input("Item Name")
                 if man and st.button("Check"):
-                    st.markdown(ask_groq(f"Recycle {man}"))
+                    st.markdown(ask_groq(f"Recycle instructions for {man}"))
+                    add_xp(15, "Manual Scan")
             else:
                 st.success("✅ Identified!")
                 st.markdown(res)
-                add_xp(15, "Scan")
+                add_xp(15, "Visual Scan")
 
 def render_map():
     if st.button("⬅️ Back"): navigate_to("🏠 Home")
-    st.header("🗺️ Eco-Map")
-    st.info("Click map to pin a spot!")
+    st.header("🗺️ Interactive Eco-Map")
+    st.info("👆 Click map to Pin Location (No typing needed!)")
     
-    m = folium.Map([20.59, 78.96], zoom_start=4)
+    # Create Map
+    m = folium.Map(location=[20.59, 78.96], zoom_start=4)
     pts = supabase.table("map_points").select("*").execute().data
-    for p in pts: folium.Marker([p['latitude'], p['longitude']], popup=p['name']).add_to(m)
+    for p in pts:
+        folium.Marker([p['latitude'], p['longitude']], popup=p['name'], icon=folium.Icon(color="green")).add_to(m)
     
-    data = st_folium(m, height=350)
+    # Render and Capture Click
+    map_data = st_folium(m, height=400, width=700)
+    
+    # Handle Click Logic
     lat, lon = 20.59, 78.96
-    if data and data.get("last_clicked"):
-        lat, lon = data["last_clicked"]["lat"], data["last_clicked"]["lng"]
-        st.write(f"📍 Selected: {lat:.4f}, {lon:.4f}")
+    if map_data and map_data.get("last_clicked"):
+        lat = map_data["last_clicked"]["lat"]
+        lon = map_data["last_clicked"]["lng"]
+        st.success(f"📍 Selected Coordinates: {lat:.4f}, {lon:.4f}")
     
+    # Form
     with st.form("pin"):
-        n = st.text_input("Name"); t = st.selectbox("Type", ["Bin", "E-Waste"])
-        if st.form_submit_button("Pin"):
-            supabase.table("map_points").insert({"user_id": st.session_state.user_id, "name": n, "latitude": lat, "longitude": lon, "type": t}).execute()
+        st.subheader("Add this Spot")
+        n = st.text_input("Location Name")
+        t = st.selectbox("Type", ["Recycle Bin", "E-Waste", "Donation Center", "Compost"])
+        if st.form_submit_button("📍 Pin Spot"):
+            supabase.table("map_points").insert({
+                "user_id": st.session_state.user_id, 
+                "name": n, "latitude": lat, "longitude": lon, "type": t
+            }).execute()
             st.success("Pinned!"); st.rerun()
 
 def render_plastic_calculator():
     if st.button("⬅️ Back"): navigate_to("🏠 Home")
-    st.header("🌊 Plastic Calc")
-    b = st.slider("Bottles/Week", 0, 50, 5)
-    bg = st.slider("Bags/Week", 0, 50, 5)
-    kg = ((b*12 + bg*5) * 52) / 1000
-    st.metric("Yearly Waste", f"{kg} kg")
-    if st.button("Reduction Plan"):
-        st.markdown(ask_groq(f"How to reduce {kg}kg plastic waste?"))
-        add_xp(20, "Audit")
-
-def render_upcycling():
-    if st.button("⬅️ Back"): navigate_to("🏠 Home")
-    st.header("🎨 Upcycling")
-    item = st.text_input("I have an old...")
-    if item and st.button("Get Ideas"):
-        st.markdown(ask_groq(f"DIY ideas for {item}"))
-        add_xp(20, "Upcycle")
-
-def render_menu():
-    if st.button("⬅️ Back"): navigate_to("🏠 Home")
-    st.header("🥗 Eco-Menu")
-    c = st.selectbox("Cuisine", ["Indian", "Italian", "Mexican"])
-    if st.button("Plan"):
-        st.markdown(ask_groq(f"Low-carbon {c} meal plan"))
-        add_xp(20, "Menu")
+    st.header("🌊 Plastic Footprint Calculator")
+    st.info("Calculate your yearly impact and get a reduction plan.")
+    
+    c1, c2 = st.columns(2)
+    with c1:
+        b = st.slider("Bottles (per week)", 0, 50, 5)
+        bg = st.slider("Plastic Bags (per week)", 0, 50, 5)
+    with c2:
+        w = st.slider("Wrappers/Packets (per week)", 0, 50, 10)
+        c = st.slider("Disposable Cups (per week)", 0, 20, 2)
+    
+    # Calculation
+    kg = ((b*12 + bg*5 + w*2 + c*10) * 52) / 1000
+    st.metric("Your Annual Plastic Waste", f"{kg:.2f} kg")
+    
+    if kg < 5: st.success("🌟 Low Impact!")
+    elif kg < 15: st.warning("⚠️ Moderate Impact")
+    else: st.error("🚨 High Impact - Needs Action!")
+    
+    if st.button("📉 Get Reduction Strategy"):
+        st.markdown(ask_groq(f"I generate {kg}kg plastic/year. Give me 3 strict tips to reduce this."))
+        add_xp(20, "Plastic Audit")
 
 def render_forest():
     if st.button("⬅️ Back"): navigate_to("🏠 Home")
-    st.header("🌳 My Forest")
+    st.header("🌳 My Virtual Forest")
+    
     trees = st.session_state.xp // 100
-    st.metric("Trees", trees)
-    st.markdown(f"# {'🌲 ' * trees}")
+    remainder = 100 - (st.session_state.xp % 100)
+    
+    st.metric("Trees Planted", trees, delta=f"Next tree in {remainder} pts")
+    
+    if trees == 0: 
+        st.markdown("# 🌱")
+        st.caption("A seedling! Keep recycling to grow it.")
+    elif trees < 5: 
+        st.markdown(f"# {'🌲 ' * trees}")
+        st.caption("A small grove is forming.")
+    else: 
+        st.markdown(f"# {'🌳 ' * trees}")
+        st.success("You have a lush forest!")
+        
+    st.write("### 📜 Impact Log")
+    logs = supabase.table("study_logs").select("*").eq("user_id", st.session_state.user_id).order("date", desc=True).limit(5).execute().data
+    for l in logs:
+        st.text(f"{l['date']} - {l['activity_type']} (+{l['minutes']} pts)")
+
+def render_upcycling():
+    if st.button("⬅️ Back"): navigate_to("🏠 Home")
+    st.header("🎨 Trash-to-Treasure")
+    item = st.text_input("I have an old...")
+    if item and st.button("Get Ideas"):
+        st.markdown(ask_groq(f"3 creative DIY upcycling ideas for {item}. Be brief."))
+        add_xp(25, "Upcycling")
+
+def render_menu():
+    if st.button("⬅️ Back"): navigate_to("🏠 Home")
+    st.header("🥗 Low-Carbon Menu")
+    c = st.selectbox("Cuisine", ["Indian", "Italian", "Mexican", "Asian"])
+    if st.button("Plan Meal"):
+        st.markdown(ask_groq(f"Suggest a low-carbon {c} meal plan. Explain why it's eco-friendly."))
+        add_xp(20, "Menu Plan")
 
 def render_voice():
     if st.button("⬅️ Back"): navigate_to("🏠 Home")
     st.header("🎙️ Voice Mode")
-    aud = st.audio_input("Speak")
+    aud = st.audio_input("Speak Question")
     if aud:
         txt = transcribe_audio(aud)
         st.write(f"You: {txt}")
         st.markdown(ask_groq(txt))
+        add_xp(10, "Voice Query")
 
 def render_chat():
     if st.button("⬅️ Back"): navigate_to("🏠 Home")
-    st.header("♻️ Chatbot")
-    up = st.file_uploader("Rules PDF", type=['pdf'])
+    st.header("♻️ Recycle Assistant")
+    up = st.file_uploader("Upload Rules PDF", type=['pdf'])
     if up: st.session_state.waste_guidelines_text = extract_text_from_pdf(up)
-    q = st.chat_input("Ask...")
+    q = st.chat_input("Ask about recycling...")
     if q: st.markdown(ask_groq(q + (st.session_state.waste_guidelines_text or "")))
+    add_xp(5, "Chat")
 
 def render_mistake():
     if st.button("⬅️ Back"): navigate_to("🏠 Home")
-    st.header("❌ Mistake Fixer")
-    m = st.text_input("Threw what?")
-    if st.button("Check"): st.markdown(ask_groq(f"I threw {m} in trash. Bad?"))
+    st.header("❌ Mistake Explainer")
+    m = st.text_input("I threw...")
+    b = st.selectbox("Into...", ["Recycle Bin", "Compost", "Trash"])
+    if st.button("Explain Impact"): 
+        st.markdown(ask_groq(f"I put {m} into {b}. Explain environmental consequence."))
+        add_xp(10, "Mistake Check")
+
+def render_leaderboard():
+    if st.button("⬅️ Back"): navigate_to("🏠 Home")
+    st.header("🏆 Global Leaderboard")
+    try:
+        data = supabase.table("user_stats").select("*").order("xp", desc=True).limit(10).execute().data
+        df = pd.DataFrame(data)
+        st.dataframe(df[['xp', 'streak']], use_container_width=True)
+    except: st.error("Unavailable")
+
+def render_carbon_tracker():
+    if st.button("⬅️ Back"): navigate_to("🏠 Home")
+    st.header("👣 Carbon Tracker")
+    t = st.selectbox("Today's Transport", ["Walk", "Bicycle", "Bus", "Car"])
+    if st.button("Log Commute"): 
+        add_xp(20, f"Transport: {t}")
+        st.success("Logged!")
 
 # ==========================================
 # 6. MAIN APP LOOP
@@ -350,15 +451,21 @@ def main():
 
     with st.sidebar:
         st.title("EcoWise")
+        st.caption(f"User: {st.session_state.user.email}")
+        st.divider()
         if st.button("🏠 Home"): navigate_to("🏠 Home")
         if st.button("📸 Visual Sorter"): navigate_to("📸 Visual Sorter")
         if st.button("🎙️ Voice Mode"): navigate_to("🎙️ Voice Mode")
-        if st.button("♻️ Chatbot"): navigate_to("♻️ Recycle Assistant")
+        if st.button("♻️ Recycling Bot"): navigate_to("♻️ Recycle Assistant")
         if st.button("🗺️ Eco-Map"): navigate_to("🗺️ Eco-Map")
         if st.button("🌊 Plastic Calc"): navigate_to("🌊 Plastic Calculator")
         if st.button("🎨 Upcycling"): navigate_to("🎨 Upcycling Station")
         if st.button("🥗 Eco-Menu"): navigate_to("🥗 Eco-Menu Planner")
         if st.button("🌳 My Forest"): navigate_to("🌳 My Forest")
+        if st.button("🏆 Leaderboard"): navigate_to("🏆 Leaderboard")
+        if st.button("👣 Carbon Tracker"): navigate_to("👣 Carbon Tracker")
+        if st.button("❌ Mistake Fixer"): navigate_to("❌ Mistake Explainer")
+        st.divider()
         if st.button("🚪 Logout"): 
             supabase.auth.sign_out()
             st.session_state.clear()
@@ -375,6 +482,8 @@ def main():
     elif f == "🎨 Upcycling Station": render_upcycling()
     elif f == "🥗 Eco-Menu Planner": render_menu()
     elif f == "🌳 My Forest": render_forest()
+    elif f == "🏆 Leaderboard": render_leaderboard()
+    elif f == "👣 Carbon Tracker": render_carbon_tracker()
 
 if __name__ == "__main__":
     main()
