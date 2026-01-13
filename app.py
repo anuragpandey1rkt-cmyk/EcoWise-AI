@@ -282,7 +282,7 @@ def render_home():
         if st.button("♻️ Recycle Assistant", use_container_width=True): navigate_to("♻️ Recycle Assistant")
         if st.button("❌ Mistake Explainer", use_container_width=True): navigate_to("❌ Mistake Explainer")
     with col2:
-        if st.button("🛒 Campus Swap", use_container_width=True): navigate_to("🛒 Campus Swap")
+        if st.button("🌊 Plastic Calculator", use_container_width=True): navigate_to("🌊 Plastic Calculator")
         if st.button("📊 Leaderboard", use_container_width=True): navigate_to("📊 Leaderboard")
         if st.button("🗺️ Eco-Map", use_container_width=True): navigate_to("🗺️ Eco-Map")
         if st.button("👣 Carbon Tracker", use_container_width=True): navigate_to("👣 Carbon Tracker")
