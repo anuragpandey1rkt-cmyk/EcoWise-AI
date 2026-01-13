@@ -443,7 +443,7 @@ def render_virtual_forest():
     logs = supabase.table("study_logs").select("*").eq("user_id", st.session_state.user_id).order("date", desc=True).limit(3).execute().data
     if logs:
         for l in logs:
-            st.text(f"📅 {l['date']} | {l['activity_type']}")
+            st.text(f" {l['date']} | {l['activity_type']}")
 
 def render_map():
     st.write(""); 
