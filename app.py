@@ -112,12 +112,12 @@ def ask_ai(prompt, system_role="You are a helpful Sustainability Expert."):
 def analyze_image(image_bytes):
     """
     Robust Vision Handler.
-    Returns "VISION_ERROR" if the model is down so the UI knows to switch to manual mode.
+    Now uses the larger 'llama-3.2-90b-vision-preview' which is currently active.
     """
     try:
         encoded_image = base64.b64encode(image_bytes).decode('utf-8')
         completion = groq_client.chat.completions.create(
-            # We try the 90b model first (usually better), but handle failure gracefully
+            # UPDATED: Switched to 90b model (Active)
             model="llama-3.2-90b-vision-preview",
             messages=[
                 {
@@ -133,12 +133,11 @@ def analyze_image(image_bytes):
         )
         return completion.choices[0].message.content
     except Exception as e:
-        # Check if the error is specifically because the model is gone/decommissioned
+        # Fallback if 90b is also busy/down
         error_str = str(e).lower()
         if "model_decommissioned" in error_str or "not found" in error_str or "400" in error_str:
             return "VISION_ERROR"
         return f"Error: {str(e)}"
-
 
 def transcribe_audio(audio_bytes):
     try:
@@ -253,14 +252,30 @@ def render_visual_sorter():
     if st.button("⬅️ Back"): navigate_to("🏠 Home")
     
     st.header("📸 AI Visual Waste Sorter")
-    st.info("Take a photo of trash. If the camera AI is updating, you can type the item name.")
+    st.info("Identify trash instantly. Use the Camera OR Upload a photo.")
+
+    # --- TABS FOR CAMERA VS UPLOAD (Solves Rotation Issue) ---
+    tab1, tab2 = st.tabs(["📸 Live Camera", "📂 Upload / Gallery"])
     
-    img_file = st.camera_input("Take a picture")
+    img_data = None
     
-    if img_file:
+    with tab1:
+        # Standard camera input
+        cam_img = st.camera_input("Take a picture")
+        if cam_img: img_data = cam_img.getvalue()
+            
+    with tab2:
+        # File uploader lets you use native phone camera with full controls
+        up_img = st.file_uploader("Choose from Gallery or Take Photo", type=['jpg', 'jpeg', 'png'])
+        if up_img: 
+            img_data = up_img.getvalue()
+            st.image(img_data, caption="Uploaded Image", use_container_width=True)
+
+    # --- PROCESSING ---
+    if img_data:
         with st.spinner("Analyzing image..."):
             # 1. Try Vision AI
-            res = analyze_image(img_file.getvalue())
+            res = analyze_image(img_data)
             
             # 2. Handle Success
             if res != "VISION_ERROR" and "Error" not in res:
@@ -268,24 +283,21 @@ def render_visual_sorter():
                 st.markdown(res)
                 add_xp(15, "Visual Scan")
                 
-            # 3. Handle Failure (Model Decommissioned)
+            # 3. Handle Failure (If Groq is completely down)
             else:
-                st.warning("⚠️ The AI Vision model is currently updating/offline. Please identify the item manually.")
+                st.warning("⚠️ The AI Vision model is currently updating. Please describe the item.")
                 
-                # Explicit instructions so user doesn't ask "What is this?"
-                item_name = st.text_input("What item is in the photo? (e.g. 'Steel Water Bottle', 'Pizza Box')", key="manual_fix")
+                # Manual Fallback
+                item_name = st.text_input("What item is in the photo?", key="manual_fix")
                 
-                if item_name and st.button("Get Recycling Instructions"):
-                    # We construct a prompt that FORCES the AI to answer about the object
-                    # instead of complaining it can't see the image.
-                    prompt = f"I have a '{item_name}'. Is it recyclable? How should I dispose of it correctly?"
-                    
-                    with st.spinner("Consulting Eco-Database..."):
+                if item_name and st.button("Get Instructions"):
+                    prompt = f"I have a '{item_name}'. Is it recyclable? How do I dispose of it?"
+                    with st.spinner("Consulting Database..."):
                         text_response = ask_ai(prompt)
                         st.success(f"Instructions for: {item_name}")
                         st.markdown(text_response)
                         add_xp(15, "Manual Scan (Fallback)")
-
+                        
 def render_voice_mode():
     st.write(""); 
     if st.button("⬅️ Back"): navigate_to("🏠 Home")
