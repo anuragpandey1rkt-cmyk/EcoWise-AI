@@ -27,7 +27,7 @@ def make_pwa_ready():
         <style>
             footer {visibility: hidden;}
             div.block-container {
-                padding-top: 2rem;
+                padding-top: 5rem; /* CHANGED FROM 2rem TO 5rem TO FIX CUTOFF */
                 padding-bottom: 5rem;
             }
             div.stButton > button {
