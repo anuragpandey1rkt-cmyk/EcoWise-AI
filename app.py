@@ -364,18 +364,61 @@ def render_mistake_explainer():
 def render_map():
     st.write(""); 
     if st.button("⬅️ Back"): navigate_to("🏠 Home")
-    st.header("🗺️ Eco-Map")
-    with st.expander("📍 Add Spot"):
-        with st.form("map"):
-            n = st.text_input("Name"); lat = st.number_input("Lat", 28.6); lon = st.number_input("Lon", 77.2)
-            t = st.selectbox("Type", ["Recycle", "Donation"])
-            if st.form_submit_button("Add"):
-                supabase.table("map_points").insert({"user_id": st.session_state.user_id, "name": n, "latitude": lat, "longitude": lon, "type": t}).execute()
-                st.success("Added!"); st.rerun()
+    st.header("🗺️ Interactive Eco-Map")
+    st.info("👆 Click anywhere on the map to pin a new recycling spot!")
+
+    # 1. Initialize Map
+    # Center on India (or your default location)
+    m = folium.Map(location=[20.5937, 78.9629], zoom_start=5)
+    
+    # 2. Add existing points from DB
     pts = supabase.table("map_points").select("*").execute().data
-    m = folium.Map([20.5, 78.9], zoom_start=5)
-    for p in pts: folium.Marker([p['latitude'], p['longitude']], popup=p['name'], icon=folium.Icon(color="green")).add_to(m)
-    st_folium(m, height=400)
+    for p in pts:
+        folium.Marker(
+            [p['latitude'], p['longitude']], 
+            popup=p['name'], 
+            tooltip=p['type'],
+            icon=folium.Icon(color="green", icon="leaf")
+        ).add_to(m)
+
+    # 3. Render Map & Capture Click
+    # return_last_object=True ensures we capture the click immediately
+    map_data = st_folium(m, height=400, width=700)
+
+    # 4. Handle Click Logic
+    clicked_lat = 20.5937
+    clicked_lon = 78.9629
+    
+    if map_data and map_data.get("last_clicked"):
+        clicked_lat = map_data["last_clicked"]["lat"]
+        clicked_lon = map_data["last_clicked"]["lng"]
+        st.success(f"📍 Selected Location: {clicked_lat:.4f}, {clicked_lon:.4f}")
+
+    st.divider()
+
+    # 5. Add Spot Form (Auto-filled with click data)
+    with st.form("add_spot_form"):
+        st.subheader("📌 Add Selected Location")
+        name = st.text_input("Location Name (e.g. 'Library Battery Bin')")
+        
+        # These columns will auto-update when map is clicked
+        c1, c2 = st.columns(2)
+        lat = c1.number_input("Latitude", value=clicked_lat, format="%.5f")
+        lon = c2.number_input("Longitude", value=clicked_lon, format="%.5f")
+        
+        type_ = st.selectbox("Type", ["Recycling Center", "E-Waste Drop", "Cloth Donation", "Compost Pit"])
+        
+        if st.form_submit_button("📍 Pin to Map"):
+            supabase.table("map_points").insert({
+                "user_id": st.session_state.user_id,
+                "name": name,
+                "latitude": lat,
+                "longitude": lon,
+                "type": type_
+            }).execute()
+            st.success("✅ Location Pinned! Refreshing...")
+            time.sleep(1)
+            st.rerun()
 
 def render_marketplace():
     st.write(""); 
@@ -420,6 +463,41 @@ def render_analytics():
     st.header("📊 Analytics")
     st.info("Community data coming soon!")
 
+def render_virtual_forest():
+    st.write(""); 
+    if st.button("⬅️ Back"): navigate_to("🏠 Home")
+    st.header("🌳 Your Virtual Forest")
+    st.info("Your sustainable actions grow this digital forest!")
+    
+    # Calculate Level based on XP
+    xp = st.session_state.xp
+    trees = xp // 100  # Every 100 points = 1 Tree
+    remainder = xp % 100
+    
+    # Visual Progression
+    st.metric("Total Trees Planted", trees, delta=f"Next tree in {100-remainder} pts")
+    
+    # Display the Forest
+    if trees == 0:
+        st.markdown("# 🌱")
+        st.caption("You have a seedling! Keep recycling to make it grow.")
+    elif trees < 5:
+        forest_art = "🌲 " * trees
+        st.markdown(f"# {forest_art}")
+        st.caption("A small grove is forming.")
+    else:
+        forest_art = "🌳 " * trees
+        st.markdown(f"# {forest_art}")
+        st.success("🌟 You have grown a lush forest! You are a true Eco-Guardian.")
+        
+    st.divider()
+    st.write("### 📜 Impact Log")
+    logs = supabase.table("study_logs").select("*").eq("user_id", st.session_state.user_id).order("date", desc=True).limit(5).execute().data
+    if logs:
+        for l in logs:
+            st.text(f"{l['date']} - {l['activity_type']} (+{l['minutes']} pts)")
+
+
 # ==========================================
 # 6. MAIN APP LOOP
 # ==========================================
@@ -456,6 +534,7 @@ def main():
         st.divider()
         if st.button("🏠 Home", use_container_width=True): navigate_to("🏠 Home")
         if st.button("📸 Visual Sorter", use_container_width=True): navigate_to("📸 Visual Sorter")
+        if st.button("🌳 My Forest", use_container_width=True): navigate_to("🌳 My Forest")    
         if st.button("🎨 Upcycling Station", use_container_width=True): navigate_to("🎨 Upcycling Station")
         if st.button("🥗 Eco-Menu Planner", use_container_width=True): navigate_to("🥗 Eco-Menu Planner") 
         if st.button("🎙️ Voice Mode", use_container_width=True): navigate_to("🎙️ Voice Mode")
@@ -472,6 +551,7 @@ def main():
     f = st.session_state.feature
     if f == "🏠 Home": render_home()
     elif f == "📸 Visual Sorter": render_visual_sorter()
+    elif f == "🌳 My Forest": render_virtual_forest()    
     elif f == "🎨 Upcycling Station": render_upcycling_station()
     elif f == "🥗 Eco-Menu Planner": render_sustainable_menu()    
     elif f == "🎙️ Voice Mode": render_voice_mode()
