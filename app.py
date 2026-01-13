@@ -10,6 +10,7 @@ from groq import Groq
 from PyPDF2 import PdfReader
 import folium
 from streamlit_folium import st_folium
+import google.generativeai as genai # <--- NEW LIBRARY FOR VISION
 
 # ==========================================
 # 1. CONFIGURATION & INIT
@@ -45,21 +46,20 @@ try:
     SUPABASE_URL = st.secrets["SUPABASE_URL"]
     SUPABASE_KEY = st.secrets["SUPABASE_ANON_KEY"]
     GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
+    GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"] # <--- NEW SECRET
 except FileNotFoundError:
     st.error("Secrets not found. Please set up .streamlit/secrets.toml")
     st.stop()
 
 # Initialize Clients
 @st.cache_resource
-def init_supabase():
-    return create_client(SUPABASE_URL, SUPABASE_KEY)
+def init_clients():
+    supa = create_client(SUPABASE_URL, SUPABASE_KEY)
+    groq = Groq(api_key=GROQ_API_KEY)
+    genai.configure(api_key=GEMINI_API_KEY) # <--- INIT GEMINI
+    return supa, groq
 
-@st.cache_resource
-def init_groq():
-    return Groq(api_key=GROQ_API_KEY)
-
-supabase = init_supabase()
-groq_client = init_groq()
+supabase, groq_client = init_clients()
 
 # ==========================================
 # 2. SESSION STATE & NAVIGATION
@@ -73,7 +73,6 @@ def init_session_state():
         "streak": 0,
         "last_action_date": None,
         "waste_guidelines_text": "",
-        "location": "Global",
         "daily_challenges": [],
         "last_challenge_date": None
     }
@@ -88,10 +87,11 @@ def navigate_to(page):
     st.rerun()
 
 # ==========================================
-# 3. AI & HELPER FUNCTIONS
+# 3. AI FUNCTIONS (GEMINI FOR VISION, GROQ FOR TEXT)
 # ==========================================
 
 def ask_ai(prompt, system_role="You are a helpful Sustainability Expert."):
+    """Uses Groq (Llama 3) for fast text chat"""
     try:
         completion = groq_client.chat.completions.create(
             model="llama-3.3-70b-versatile",
@@ -106,40 +106,29 @@ def ask_ai(prompt, system_role="You are a helpful Sustainability Expert."):
     except Exception as e:
         return f"AI Error: {str(e)}"
 
-# ==========================================
-# PASTE THIS TO REPLACE 'analyze_image'
-# ==========================================
 def analyze_image(image_bytes):
     """
-    Robust Vision Handler.
-    Now uses the larger 'llama-3.2-90b-vision-preview' which is currently active.
+    Uses Google Gemini Flash 1.5 for Vision.
+    This is extremely stable and free.
     """
     try:
-        encoded_image = base64.b64encode(image_bytes).decode('utf-8')
-        completion = groq_client.chat.completions.create(
-            # UPDATED: Switched to 90b model (Active)
-            model="llama-3.2-90b-vision-preview",
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": "Identify this object. Is it recyclable, compostable, or trash? Be brief and give strict disposal instructions."},
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{encoded_image}"}}
-                    ]
-                }
-            ],
-            temperature=0.5,
-            max_tokens=500
-        )
-        return completion.choices[0].message.content
+        # 1. Convert bytes to PIL Image for Gemini
+        import PIL.Image
+        import io
+        image = PIL.Image.open(io.BytesIO(image_bytes))
+        
+        # 2. Call Gemini
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        response = model.generate_content([
+            "Identify this object. Is it recyclable, compostable, or trash? Be brief and give strict disposal instructions.", 
+            image
+        ])
+        return response.text
     except Exception as e:
-        # Fallback if 90b is also busy/down
-        error_str = str(e).lower()
-        if "model_decommissioned" in error_str or "not found" in error_str or "400" in error_str:
-            return "VISION_ERROR"
-        return f"Error: {str(e)}"
+        return f"Vision Error: {str(e)}"
 
 def transcribe_audio(audio_bytes):
+    """Uses Groq Whisper for Audio"""
     try:
         transcription = groq_client.audio.transcriptions.create(
             file=("voice.wav", audio_bytes),
@@ -196,7 +185,7 @@ def add_xp(amount, activity_name):
         st.error(f"Sync Error: {e}")
 
 # ==========================================
-# 4. FEATURE RENDERERS (One function per feature)
+# 4. FEATURE RENDERERS
 # ==========================================
 
 def render_home():
@@ -212,7 +201,7 @@ def render_home():
     
     st.divider()
     
-    # Quick Actions Grid
+    # Quick Actions
     st.subheader("🚀 Quick Actions")
     col1, col2 = st.columns(2)
     with col1:
@@ -243,66 +232,41 @@ def render_home():
             add_xp(20, f"Challenge: {task}")
             st.balloons()
 
-
-# ==========================================
-# PASTE THIS TO REPLACE 'render_visual_sorter'
-# ==========================================
 def render_visual_sorter():
     st.write(""); 
     if st.button("⬅️ Back"): navigate_to("🏠 Home")
-    
     st.header("📸 AI Visual Waste Sorter")
-    st.info("Identify trash instantly. Use the Camera OR Upload a photo.")
-
-    # --- TABS FOR CAMERA VS UPLOAD (Solves Rotation Issue) ---
-    tab1, tab2 = st.tabs(["📸 Live Camera", "📂 Upload / Gallery"])
+    st.info("Identify trash instantly using Google Gemini Vision.")
     
+    # Tabs for Camera or Upload
+    tab1, tab2 = st.tabs(["📸 Live Camera", "📂 Gallery Upload"])
     img_data = None
-    
+
     with tab1:
-        # Standard camera input
         cam_img = st.camera_input("Take a picture")
         if cam_img: img_data = cam_img.getvalue()
-            
+    
     with tab2:
-        # File uploader lets you use native phone camera with full controls
-        up_img = st.file_uploader("Choose from Gallery or Take Photo", type=['jpg', 'jpeg', 'png'])
+        up_img = st.file_uploader("Upload Image", type=['jpg','png','jpeg'])
         if up_img: 
             img_data = up_img.getvalue()
             st.image(img_data, caption="Uploaded Image", use_container_width=True)
 
-    # --- PROCESSING ---
     if img_data:
-        with st.spinner("Analyzing image..."):
-            # 1. Try Vision AI
+        with st.spinner("Analyzing with Gemini Vision..."):
             res = analyze_image(img_data)
-            
-            # 2. Handle Success
-            if res != "VISION_ERROR" and "Error" not in res:
+            if "Vision Error" in res:
+                st.error(res)
+            else:
                 st.success("✅ Analysis Complete!")
                 st.markdown(res)
                 add_xp(15, "Visual Scan")
-                
-            # 3. Handle Failure (If Groq is completely down)
-            else:
-                st.warning("⚠️ The AI Vision model is currently updating. Please describe the item.")
-                
-                # Manual Fallback
-                item_name = st.text_input("What item is in the photo?", key="manual_fix")
-                
-                if item_name and st.button("Get Instructions"):
-                    prompt = f"I have a '{item_name}'. Is it recyclable? How do I dispose of it?"
-                    with st.spinner("Consulting Database..."):
-                        text_response = ask_ai(prompt)
-                        st.success(f"Instructions for: {item_name}")
-                        st.markdown(text_response)
-                        add_xp(15, "Manual Scan (Fallback)")
-                        
+
 def render_voice_mode():
     st.write(""); 
     if st.button("⬅️ Back"): navigate_to("🏠 Home")
     st.header("🎙️ Voice Assistant")
-    st.write("Speak your question (English/Hindi).")
+    st.write("Speak your question.")
     
     audio = st.audio_input("Record")
     if audio:
@@ -335,8 +299,6 @@ def render_mistake_explainer():
     st.write(""); 
     if st.button("⬅️ Back"): navigate_to("🏠 Home")
     st.header("❌ Mistake Explainer")
-    st.write("Admit a mistake to learn impact (No judgment!).")
-    
     m = st.text_input("I wrongly disposed of...")
     b = st.selectbox("Into...", ["Recycle Bin", "Compost", "Trash"])
     if st.button("Explain Impact"):
@@ -384,7 +346,6 @@ def render_leaderboard():
     st.write(""); 
     if st.button("⬅️ Back"): navigate_to("🏠 Home")
     st.header("🏆 Global Leaderboard")
-    
     try:
         data = supabase.table("user_stats").select("*").order("xp", desc=True).limit(10).execute().data
         if data:
@@ -404,14 +365,6 @@ def render_analytics():
         st.bar_chart(df['activity_type'].value_counts())
     else: st.info("No data yet.")
 
-def render_greenwash_detector():
-    st.write(""); 
-    if st.button("⬅️ Back"): navigate_to("🏠 Home")
-    st.header("🕵️ Greenwash Detector")
-    t = st.text_area("Product Claim")
-    if st.button("Analyze") and t:
-        st.write(ask_ai(f"Analyze greenwashing: {t}")); add_xp(10, "Check")
-
 def render_carbon_tracker():
     st.write(""); 
     if st.button("⬅️ Back"): navigate_to("🏠 Home")
@@ -425,7 +378,6 @@ def render_carbon_tracker():
 def main():
     make_pwa_ready()
     
-    # --- AUTH SECTION ---
     if not st.session_state.user:
         st.title("🌱 EcoWise Login")
         t1, t2 = st.tabs(["Login", "Sign Up"])
@@ -455,8 +407,6 @@ def main():
         st.title("EcoWise AI")
         st.write(f"👤 {st.session_state.user.email}")
         st.divider()
-        
-        # Navigation Menu
         if st.button("🏠 Home", use_container_width=True): navigate_to("🏠 Home")
         if st.button("📸 Visual Sorter", use_container_width=True): navigate_to("📸 Visual Sorter")
         if st.button("🎙️ Voice Mode", use_container_width=True): navigate_to("🎙️ Voice Mode")
@@ -464,16 +414,13 @@ def main():
         if st.button("🗺️ Eco-Map", use_container_width=True): navigate_to("🗺️ Eco-Map")
         if st.button("🛒 Campus Swap", use_container_width=True): navigate_to("🛒 Campus Swap")
         if st.button("📊 Leaderboard", use_container_width=True): navigate_to("📊 Leaderboard")
-        if st.button("📈 Analytics", use_container_width=True): navigate_to("📈 Analytics")
-        if st.button("❌ Mistake Explainer", use_container_width=True): navigate_to("❌ Mistake Explainer")
-        
         st.divider()
         if st.button("🚪 Logout"): 
             supabase.auth.sign_out()
             st.session_state.clear()
             st.rerun()
 
-    # --- MAIN CONTENT ROUTING ---
+    # --- ROUTING ---
     f = st.session_state.feature
     if f == "🏠 Home": render_home()
     elif f == "📸 Visual Sorter": render_visual_sorter()
@@ -483,7 +430,6 @@ def main():
     elif f == "🗺️ Eco-Map": render_map()
     elif f == "🛒 Campus Swap": render_marketplace()
     elif f == "📊 Leaderboard": render_leaderboard()
-    elif f == "📈 Analytics": render_analytics()
     elif f == "👣 Carbon Tracker": render_carbon_tracker()
 
 if __name__ == "__main__":
