@@ -89,7 +89,7 @@ def navigate_to(page):
     st.rerun()
 
 # ==========================================
-# 3. AI FUNCTIONS
+# 3. AI FUNCTIONS (BRUTE FORCE VERSION)
 # ==========================================
 
 def ask_ai(prompt, system_role="You are a helpful Sustainability Expert."):
@@ -110,26 +110,40 @@ def ask_ai(prompt, system_role="You are a helpful Sustainability Expert."):
 
 def analyze_image(image_bytes):
     """
-    Uses Google Gemini 1.5 Flash.
+    BRUTE FORCE METHOD:
+    Tries every known Gemini Vision model until one works.
     """
     try:
-        # 1. Convert bytes to PIL Image (Required for Gemini)
         image = PIL.Image.open(io.BytesIO(image_bytes))
         
-        # 2. Call Gemini Flash
-        # We use 'gemini-1.5-flash' which is the current stable vision model
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        # List of models to try in order
+        models = [
+            'gemini-1.5-flash',
+            'gemini-1.5-flash-latest',
+            'models/gemini-1.5-flash',
+            'gemini-1.5-pro',
+            'gemini-pro-vision'
+        ]
         
-        response = model.generate_content([
-            "Identify this object exactly. Is it recyclable, compostable, or trash? Be brief and give strict disposal instructions.", 
-            image
-        ])
-        return response.text
+        last_error = ""
+        
+        for model_name in models:
+            try:
+                model = genai.GenerativeModel(model_name)
+                response = model.generate_content([
+                    "Identify this object exactly. Is it recyclable, compostable, or trash? Be brief and give strict disposal instructions.", 
+                    image
+                ])
+                return response.text # If successful, return immediately
+            except Exception as e:
+                last_error = str(e)
+                continue # If fail, try next model
+        
+        # If all fail, return debug info
+        return f"All models failed. Last Error: {last_error}"
+
     except Exception as e:
-        # Specific error handling for Model Not Found
-        if "404" in str(e):
-            return "API Error: Model 'gemini-1.5-flash' not found. Please check your API Key permissions or Region."
-        return f"Vision Error: {str(e)}"
+        return f"Image Error: {str(e)}"
 
 def transcribe_audio(audio_bytes):
     try:
@@ -245,9 +259,8 @@ def render_visual_sorter():
     if img_data:
         with st.spinner("Analyzing with Gemini Vision..."):
             res = analyze_image(img_data)
-            if "Vision Error" in res or "API Error" in res:
+            if "Vision Error" in res or "API Error" in res or "All models failed" in res:
                 st.error(res)
-                # Manual Fallback
                 st.warning("⚠️ Vision failed. Please describe the item.")
                 man = st.text_input("Item Name (e.g., Plastic Bottle)")
                 if man and st.button("Check Manual"):
@@ -429,3 +442,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    
