@@ -10,7 +10,9 @@ from groq import Groq
 from PyPDF2 import PdfReader
 import folium
 from streamlit_folium import st_folium
-import google.generativeai as genai # <--- NEW LIBRARY FOR VISION
+import google.generativeai as genai
+import PIL.Image
+import io
 
 # ==========================================
 # 1. CONFIGURATION & INIT
@@ -46,7 +48,7 @@ try:
     SUPABASE_URL = st.secrets["SUPABASE_URL"]
     SUPABASE_KEY = st.secrets["SUPABASE_ANON_KEY"]
     GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
-    GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"] # <--- NEW SECRET
+    GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
 except FileNotFoundError:
     st.error("Secrets not found. Please set up .streamlit/secrets.toml")
     st.stop()
@@ -56,7 +58,7 @@ except FileNotFoundError:
 def init_clients():
     supa = create_client(SUPABASE_URL, SUPABASE_KEY)
     groq = Groq(api_key=GROQ_API_KEY)
-    genai.configure(api_key=GEMINI_API_KEY) # <--- INIT GEMINI
+    genai.configure(api_key=GEMINI_API_KEY)
     return supa, groq
 
 supabase, groq_client = init_clients()
@@ -87,7 +89,7 @@ def navigate_to(page):
     st.rerun()
 
 # ==========================================
-# 3. AI FUNCTIONS (GEMINI FOR VISION, GROQ FOR TEXT)
+# 3. AI FUNCTIONS (ROBUST VERSION)
 # ==========================================
 
 def ask_ai(prompt, system_role="You are a helpful Sustainability Expert."):
@@ -108,27 +110,41 @@ def ask_ai(prompt, system_role="You are a helpful Sustainability Expert."):
 
 def analyze_image(image_bytes):
     """
-    Uses Google Gemini Flash 1.5 for Vision.
-    This is extremely stable and free.
+    Tries multiple Gemini models to prevent 404/Decommissioned errors.
     """
     try:
-        # 1. Convert bytes to PIL Image for Gemini
-        import PIL.Image
-        import io
+        # Convert bytes to PIL Image
         image = PIL.Image.open(io.BytesIO(image_bytes))
         
-        # 2. Call Gemini
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        response = model.generate_content([
-            "Identify this object. Is it recyclable, compostable, or trash? Be brief and give strict disposal instructions.", 
-            image
-        ])
-        return response.text
+        # LIST OF MODELS TO TRY (In order of preference)
+        # This fixes the "Model Not Found" error by trying alternatives
+        models_to_try = [
+            'gemini-1.5-flash',
+            'gemini-1.5-flash-001',
+            'gemini-1.5-pro',
+            'gemini-pro-vision'
+        ]
+        
+        last_error = ""
+        
+        for model_name in models_to_try:
+            try:
+                model = genai.GenerativeModel(model_name)
+                response = model.generate_content([
+                    "Identify this object. Is it recyclable, compostable, or trash? Be brief and give strict disposal instructions.", 
+                    image
+                ])
+                return response.text
+            except Exception as e:
+                last_error = str(e)
+                continue # Try the next model in the list
+        
+        return f"Vision Error: Could not connect to any Google Model. Last error: {last_error}"
+
     except Exception as e:
-        return f"Vision Error: {str(e)}"
+        return f"Image Error: {str(e)}"
 
 def transcribe_audio(audio_bytes):
-    """Uses Groq Whisper for Audio"""
     try:
         transcription = groq_client.audio.transcriptions.create(
             file=("voice.wav", audio_bytes),
@@ -257,6 +273,11 @@ def render_visual_sorter():
             res = analyze_image(img_data)
             if "Vision Error" in res:
                 st.error(res)
+                # Manual Fallback
+                st.warning("⚠️ Try describing the item if the image fails.")
+                man = st.text_input("Item Name")
+                if man and st.button("Check Manual"):
+                    st.markdown(ask_ai(f"How to recycle: {man}"))
             else:
                 st.success("✅ Analysis Complete!")
                 st.markdown(res)
