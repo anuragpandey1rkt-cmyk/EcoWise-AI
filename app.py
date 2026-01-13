@@ -13,6 +13,7 @@ from streamlit_folium import st_folium
 import requests
 from PIL import Image
 import io
+import google.generativeai as genai
 
 # ==========================================
 # 1. CONFIGURATION & INIT
@@ -48,7 +49,9 @@ try:
     SUPABASE_URL = st.secrets["SUPABASE_URL"]
     SUPABASE_KEY = st.secrets["SUPABASE_ANON_KEY"]
     GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
-    HF_TOKEN = st.secrets["HF_TOKEN"]
+    # We try to load both keys. If one is missing, we just skip that provider.
+    GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", "")
+    HF_TOKEN = st.secrets.get("HF_TOKEN", "")
 except FileNotFoundError:
     st.error("Secrets not found. Please set up .streamlit/secrets.toml")
     st.stop()
@@ -58,6 +61,11 @@ except FileNotFoundError:
 def init_clients():
     supa = create_client(SUPABASE_URL, SUPABASE_KEY)
     groq = Groq(api_key=GROQ_API_KEY)
+    
+    # Init Gemini if key exists
+    if GEMINI_API_KEY:
+        genai.configure(api_key=GEMINI_API_KEY)
+        
     return supa, groq
 
 supabase, groq_client = init_clients()
@@ -88,7 +96,7 @@ def navigate_to(page):
     st.rerun()
 
 # ==========================================
-# 3. AI FUNCTIONS (TWO-BRAIN APPROACH)
+# 3. AI ENGINES (CASCADING FALLBACK SYSTEM)
 # ==========================================
 
 def ask_groq(prompt, system_role="You are a helpful Sustainability Expert."):
@@ -107,45 +115,56 @@ def ask_groq(prompt, system_role="You are a helpful Sustainability Expert."):
     except Exception as e:
         return f"Logic Error: {str(e)}"
 
-def analyze_image_with_hf(image_bytes):
+def analyze_image_robust(image_bytes):
     """
-    Uses Hugging Face (Salesforce BLIP) to identify the image content.
-    Then sends that content to Groq for recycling advice.
+    ATTEMPT 1: Google Gemini (Best Quality)
+    ATTEMPT 2: Hugging Face (Best Availability)
     """
-    # Using Salesforce BLIP model which is excellent for describing images
-    API_URL = "https://api-inference.huggingface.co/models/Salesforce/blip-image-captioning-large"
-    headers = {"Authorization": f"Bearer {HF_TOKEN}"}
+    image_pil = Image.open(io.BytesIO(image_bytes))
 
-    try:
-        # 1. Ask Hugging Face: "What is in this picture?"
-        response = requests.post(API_URL, headers=headers, data=image_bytes)
-        
-        # Check for model loading error (common with free tier)
-        if response.status_code == 503:
-            return "HF_LOADING"
+    # --- ATTEMPT 1: GOOGLE GEMINI ---
+    if GEMINI_API_KEY:
+        try:
+            # Try standard Flash model
+            model = genai.GenerativeModel('gemini-1.5-flash')
+            response = model.generate_content([
+                "Identify this object exactly. Is it recyclable, compostable, or trash? Be brief and give strict disposal instructions.", 
+                image_pil
+            ])
+            return response.text
+        except Exception as e:
+            print(f"Gemini Failed: {e}") 
+            # If Gemini fails (404/Region), we intentionally drop to Attempt 2
+            pass 
+
+    # --- ATTEMPT 2: HUGGING FACE (Salesforce BLIP) ---
+    if HF_TOKEN:
+        try:
+            API_URL = "https://api-inference.huggingface.co/models/Salesforce/blip-image-captioning-large"
+            headers = {"Authorization": f"Bearer {HF_TOKEN}"}
             
-        if response.status_code != 200:
-            return f"HF_ERROR: {response.status_code}"
-
-        # Output format is: [{'generated_text': 'a close up of a bottle'}]
-        prediction = response.json()
-        
-        if isinstance(prediction, list) and 'generated_text' in prediction[0]:
-            item_description = prediction[0]['generated_text']
+            # Send bytes directly
+            response = requests.post(API_URL, headers=headers, data=image_bytes)
             
-            # 2. Ask Groq: "How do I recycle [item_description]?"
-            advice = ask_groq(
-                f"I have an item that looks like '{item_description}'. "
-                f"1. Identify specifically what it likely is. "
-                f"2. Is it recyclable? "
-                f"3. How should I dispose of it? Be brief."
-            )
-            return f"**Detected:** {item_description.title()}\n\n{advice}"
-        else:
-            return "HF_ERROR"
+            if response.status_code == 200:
+                prediction = response.json()
+                if isinstance(prediction, list) and 'generated_text' in prediction[0]:
+                    item_name = prediction[0]['generated_text']
+                    
+                    # Ask Groq for advice based on the name
+                    advice = ask_groq(
+                        f"I have an item that looks like '{item_name}'. "
+                        f"1. Identify specifically what it likely is. "
+                        f"2. Is it recyclable? "
+                        f"3. How should I dispose of it? Be brief."
+                    )
+                    return f"**Detected (via HF):** {item_name.title()}\n\n{advice}"
+        except Exception as e:
+            print(f"HF Failed: {e}")
+            pass
 
-    except Exception as e:
-        return f"HF_ERROR: {str(e)}"
+    # --- FINAL FAILURE ---
+    return "ALL_AI_FAILED"
 
 def transcribe_audio(audio_bytes):
     try:
@@ -251,7 +270,7 @@ def render_visual_sorter():
     st.write(""); 
     if st.button("⬅️ Back"): navigate_to("🏠 Home")
     st.header("📸 AI Visual Waste Sorter")
-    st.info("Identify trash instantly using Hugging Face Vision.")
+    st.info("Identify trash instantly using Multi-AI Vision.")
     
     # Tabs for Camera or Upload
     tab1, tab2 = st.tabs(["📸 Live Camera", "📂 Gallery Upload"])
@@ -267,20 +286,12 @@ def render_visual_sorter():
             st.image(img_data, width=300)
 
     if img_data:
-        with st.spinner("Analyzing image..."):
-            res = analyze_image_with_hf(img_data)
+        with st.spinner("Scanning with AI (Trying Google Gemini -> Hugging Face)..."):
+            res = analyze_image_robust(img_data)
             
-            # Handle Errors
-            if "HF_ERROR" in res:
-                st.error("Vision AI Error. Please check your HF Token or try again.")
-                st.warning("⚠️ Manual Override:")
-                man = st.text_input("Describe the item (e.g., Plastic Bottle)")
-                if man and st.button("Check Manual"):
-                    st.markdown(ask_groq(f"How to recycle: {man}"))
-                    
-            elif "HF_LOADING" in res:
-                st.info("⌛ Model is loading (Cold Start)... Please click 'Take picture' again in 20 seconds.")
-                
+            if res == "ALL_AI_FAILED":
+                st.error("⚠️ All AI services are currently unreachable.")
+                st.info("This usually means API keys are missing or Quota exceeded.")
             else:
                 st.success("✅ Analysis Complete!")
                 st.markdown(res)
