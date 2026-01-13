@@ -303,6 +303,54 @@ def render_recycle_assistant():
         res = ask_groq(q, role)
         st.write(res); add_xp(5, "Query")
 
+# ==========================================
+# NEW WINNER FEATURES
+# ==========================================
+
+def render_upcycling_station():
+    st.write(""); 
+    if st.button("⬅️ Back"): navigate_to("🏠 Home")
+    st.header("🎨 Trash-to-Treasure (Upcycling)")
+    st.info("Don't just recycle—REUSE! Turn waste into cool new items.")
+    
+    item = st.text_input("What item do you have? (e.g., Old Jeans, Plastic Bottles, Cardboard)")
+    
+    if item and st.button("Generate DIY Ideas"):
+        with st.spinner(f"Brainstorming creative uses for {item}..."):
+            # Prompting the 'Brain' (Groq) for creativity
+            prompt = (
+                f"I have '{item}'. Give me 3 creative DIY upcycling ideas to reuse it. "
+                f"1. A quick 5-minute hack. "
+                f"2. A creative home decor idea. "
+                f"3. A useful utility item. "
+                f"Format nicely with emojis and brief instructions."
+            )
+            res = ask_groq(prompt)
+            st.markdown(res)
+            add_xp(25, "Upcycling Brainstorm")
+
+def render_sustainable_menu():
+    st.write(""); 
+    if st.button("⬅️ Back"): navigate_to("🏠 Home")
+    st.header("🥗 Low-Carbon Menu Planner")
+    st.info("Plan meals that are good for you and the planet.")
+    
+    cuisine = st.selectbox("Cuisine Style", ["Indian", "Italian", "Mexican", "Asian", "Quick Snack"])
+    occasion = st.text_input("Occasion (e.g., Dinner Party, Office Lunch)")
+    
+    if st.button("Plan Eco-Menu"):
+        with st.spinner("Chef AI is cooking up a plan..."):
+            prompt = (
+                f"Suggest a sustainable, low-carbon meal menu for a '{cuisine}' style '{occasion}'. "
+                f"Focus on seasonal, plant-based, or local ingredients. "
+                f"Explain why this menu is eco-friendly compared to a meat-heavy alternative."
+            )
+            res = ask_groq(prompt)
+            st.markdown(res)
+            st.success("🌱 Eating plant-rich meals can reduce your carbon footprint by up to 50%!")
+            add_xp(20, "Eco-Menu Planning")
+
+
 def render_mistake_explainer():
     st.write(""); 
     if st.button("⬅️ Back"): navigate_to("🏠 Home")
@@ -408,6 +456,8 @@ def main():
         st.divider()
         if st.button("🏠 Home", use_container_width=True): navigate_to("🏠 Home")
         if st.button("📸 Visual Sorter", use_container_width=True): navigate_to("📸 Visual Sorter")
+        if st.button("🎨 Upcycling Station", use_container_width=True): navigate_to("🎨 Upcycling Station")
+        if st.button("🥗 Eco-Menu Planner", use_container_width=True): navigate_to("🥗 Eco-Menu Planner") 
         if st.button("🎙️ Voice Mode", use_container_width=True): navigate_to("🎙️ Voice Mode")
         if st.button("♻️ Recycle Assistant", use_container_width=True): navigate_to("♻️ Recycle Assistant")
         if st.button("🗺️ Eco-Map", use_container_width=True): navigate_to("🗺️ Eco-Map")
@@ -422,6 +472,8 @@ def main():
     f = st.session_state.feature
     if f == "🏠 Home": render_home()
     elif f == "📸 Visual Sorter": render_visual_sorter()
+    elif f == "🎨 Upcycling Station": render_upcycling_station()
+    elif f == "🥗 Eco-Menu Planner": render_sustainable_menu()    
     elif f == "🎙️ Voice Mode": render_voice_mode()
     elif f == "♻️ Recycle Assistant": render_recycle_assistant()
     elif f == "❌ Mistake Explainer": render_mistake_explainer()
