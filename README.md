@@ -1,3 +1,8 @@
+## 🌱 EcoWise AI – Hyper-Local Sustainability Assistant
+
+🔗 **Live App:** https://ecowise-ai-2026.streamlit.app/  
+📦 **Source Code:** https://github.com/anuragpandey1rkt-cmyk/EcoWise-AI
+
 🌱 EcoWise AI – Hyper-Local Sustainability Assistant
 
 EcoWise AI is a full-stack, AI-powered sustainability platform built with Streamlit that helps users make smarter, eco-friendly decisions through AI vision, voice, maps, gamification, and analytics.
