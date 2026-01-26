@@ -492,6 +492,16 @@ def main():
                     st.session_state.user = res.user; st.session_state.user_id = res.user.id
                     sync_user_stats(res.user.id); st.rerun()
                 except Exception as err: st.error(str(err))
+            
+            with st.expander("Forgot Password?"):
+                st.caption("Enter your email to receive a password reset link.")
+                reset_email = st.text_input("Recovery Email")
+                if st.button("Send Reset Link"):
+                    try:
+                        supabase.auth.reset_password_email(reset_email)
+                        st.success("Check your email! Click the link to log in, then change your password.")
+                    except Exception as err:
+                        st.error(f"Error: {str(err)}")
         with t2:
             e2 = st.text_input("Email (New)")
             p2 = st.text_input("Password (New)", type="password")
@@ -524,6 +534,14 @@ def main():
         if st.button("🏆 Leaderboard"): navigate_to("🏆 Leaderboard")
         if st.button("👣 Carbon Tracker"): navigate_to("👣 Carbon Tracker")
         if st.button("❌ Mistake Fixer"): navigate_to("❌ Mistake Explainer")
+        with st.expander("🔐 Change Password"):
+            new_pass = st.text_input("New Password", type="password", key="new_p_sidebar")
+            if st.button("Update Password"):
+                try:
+                    supabase.auth.update_user({"password": new_pass})
+                    st.success("Password Updated Successfully!")
+                except Exception as err:
+                    st.error(f"Error: {str(err)}")
         st.divider()
         if st.button("🚪 Logout"): 
             supabase.auth.sign_out()
