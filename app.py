@@ -474,17 +474,30 @@ def render_carbon_tracker():
         add_xp(xp_earned, f"Transport: {mode}")
 
 # ==========================================
-# 6. MAIN APP LOOP (Final Polish)
+# 6. MAIN APP LOOP (With Magic Link Fix)
 # ==========================================
 def main():
     init_session_state()
     make_pwa_ready()
     
+    # --- 🛠️ FIX: CHECK FOR SESSION ON APP LOAD ---
+    # This detects if the user clicked a "Magic Link" or "Reset Password" link
+    if not st.session_state.user:
+        try:
+            session = supabase.auth.get_session()
+            if session:
+                st.session_state.user = session.user
+                st.session_state.user_id = session.user.id
+                sync_user_stats(session.user.id)
+                st.rerun() # Refresh to show the Home Screen
+        except:
+            pass
+    # ---------------------------------------------
+    
     # --- IF USER IS NOT LOGGED IN ---
     if not st.session_state.user:
         st.title("🌱 EcoWise Login")
         
-        # Professional Toggle for Modes
         mode = st.radio("Choose Mode", ["Login", "Sign Up", "Forgot Password"], horizontal=True, label_visibility="collapsed")
 
         # --- MODE 1: LOGIN ---
@@ -511,35 +524,30 @@ def main():
             
             if st.button("Sign Up", use_container_width=True):
                 try:
-                    # We ONLY create the Auth user here.
-                    # We do NOT write to the database yet to avoid the "Security Policy" error.
                     res = supabase.auth.sign_up({"email": e2, "password": p2})
-                    
                     if res.user: 
-                        st.success("✅ Account created! Please check your email (and Spam folder) to verify your account, then Login.")
+                        st.success("✅ Account created! Please check your email to verify it, then Login.")
                 except Exception as err: 
                     st.error(f"Error: {str(err)}")
 
         # --- MODE 3: FORGOT PASSWORD ---
         elif mode == "Forgot Password":
             st.subheader("Reset Your Password")
-            st.info("Enter your email address. We will send you a secure link to log in instantly.")
+            st.info("Enter your registered email. We will send you a link to log in.")
             
             reset_email = st.text_input("Registered Email ID")
             
             if st.button("Send Reset Link", use_container_width=True):
                 if reset_email:
                     try:
-                        # IMPORTANT: Ensure this URL matches your actual deployed app URL
-                        # If running locally, use http://localhost:8501
+                        # Ensure this URL matches your app exactly
                         supabase.auth.reset_password_email(reset_email, options={
                             "redirect_to": "https://ecowise-ai-2026.streamlit.app" 
                         })
                         st.success("✅ Link sent! Check your email (and Spam folder). Click the link to log in.")
                     except Exception as err:
-                        error_msg = str(err).lower()
-                        if "rate limit" in error_msg:
-                            st.warning("⏳ You have requested too many emails recently. Please wait a while before trying again.")
+                        if "rate limit" in str(err).lower():
+                            st.warning("⏳ Too many requests. Please wait a while or check your inbox for the previous email.")
                         else:
                             st.error(f"Error: {str(err)}")
                 else:
@@ -573,7 +581,7 @@ def main():
             if st.button("Update Password"):
                 try:
                     supabase.auth.update_user({"password": new_pass})
-                    st.success("✅ Password Updated! You can now login with this new password.")
+                    st.success("✅ Password Updated!")
                 except Exception as err:
                     st.error(f"Error: {str(err)}")
         # ----------------------------------------------------
