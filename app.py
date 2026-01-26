@@ -474,39 +474,65 @@ def render_carbon_tracker():
         add_xp(xp_earned, f"Transport: {mode}")
 
 # ==========================================
-# 6. MAIN APP LOOP (Final Fixed Version)
+# 6. MAIN APP LOOP (With JS Bridge Fix)
 # ==========================================
 def main():
     init_session_state()
     make_pwa_ready()
     
-    # --- 🛠️ CRITICAL FIX: AUTO-LOGIN FROM EMAIL LINK ---
-    # This code checks if the user just arrived from a magic link
-    if not st.session_state.user:
-        try:
-            # This grabs the session token from the URL (if valid)
-            session = supabase.auth.get_session()
+    # --- 🛠️ STEP 1: JAVASCRIPT BRIDGE 🛠️ ---
+    # This script runs in the browser. If it sees a Hash (#) with a token, 
+    # it reloads the page as a Query (?) so Python can read it.
+    st.markdown("""
+    <script>
+    if (window.location.hash && window.location.hash.includes("access_token")) {
+        const hash = window.location.hash.substring(1);
+        // Reload the page with the hash converted to query parameters
+        window.location.href = window.location.pathname + "?" + hash;
+    }
+    </script>
+    """, unsafe_allow_html=True)
+    # ----------------------------------------
+
+    # --- 🛠️ STEP 2: PYTHON TOKEN CATCHER 🛠️ ---
+    # Now Python checks if the JS Bridge successfully passed the token
+    try:
+        # Get query parameters
+        query_params = st.query_params
+        
+        # Check if we have the tokens
+        access_token = query_params.get("access_token")
+        refresh_token = query_params.get("refresh_token")
+        
+        if access_token and refresh_token:
+            # Manually set the session using the tokens
+            session = supabase.auth.set_session(access_token, refresh_token)
+            
             if session:
                 st.session_state.user = session.user
                 st.session_state.user_id = session.user.id
                 sync_user_stats(session.user.id)
-                st.success("✅ Logged in successfully via Magic Link!")
-                time.sleep(1) # Brief pause so they see the success message
+                
+                # Clear the URL so it looks clean
+                st.query_params.clear()
+                
+                st.success("✅ Logged in via Reset Link!")
+                time.sleep(1)
                 st.rerun()
-        except Exception as e:
-            # If the link is expired (otp_expired), this silently fails 
-            # and shows the login screen below, which is correct behavior.
-            pass
-    # ---------------------------------------------------
+    except Exception as e:
+        # If any error happens during token parsing, just ignore it and show login
+        pass
+    # ---------------------------------------------
 
-    # --- IF USER IS NOT LOGGED IN ---
+    # --- REST OF THE APP LOGIC ---
+
+    # IF USER IS NOT LOGGED IN
     if not st.session_state.user:
         st.title("🌱 EcoWise Login")
         
-        # Professional Toggle
         mode = st.radio("Choose Mode", ["Login", "Sign Up", "Forgot Password"], horizontal=True, label_visibility="collapsed")
 
-        # --- MODE 1: LOGIN ---
+        # MODE 1: LOGIN
         if mode == "Login":
             st.subheader("Welcome Back!")
             e = st.text_input("Email")
@@ -522,7 +548,7 @@ def main():
                 except Exception as err:
                     st.error(f"Login failed: {str(err)}")
 
-        # --- MODE 2: SIGN UP ---
+        # MODE 2: SIGN UP
         elif mode == "Sign Up":
             st.subheader("Create an Account")
             e2 = st.text_input("Email (New)")
@@ -532,25 +558,25 @@ def main():
                 try:
                     res = supabase.auth.sign_up({"email": e2, "password": p2})
                     if res.user: 
-                        st.success("✅ Account created! Please check your email to verify it, then Login.")
+                        st.success("✅ Account created! Please check your email (and Spam folder) to verify it.")
                 except Exception as err: 
                     st.error(f"Error: {str(err)}")
 
-        # --- MODE 3: FORGOT PASSWORD ---
+        # MODE 3: FORGOT PASSWORD
         elif mode == "Forgot Password":
             st.subheader("Reset Your Password")
-            st.info("Enter your registered email. We will send you a link to log in.")
+            st.info("Enter your registered email.")
             
             reset_email = st.text_input("Registered Email ID")
             
             if st.button("Send Reset Link", use_container_width=True):
                 if reset_email:
                     try:
-                        # Ensure this URL matches your deployed app URL exactly
+                        # IMPORTANT: Use your exact deployed URL here
                         supabase.auth.reset_password_email(reset_email, options={
                             "redirect_to": "https://ecowise-ai-2026.streamlit.app" 
                         })
-                        st.success("✅ Link sent! Check your email (and Spam folder). Click the link to log in.")
+                        st.success("✅ Link sent! Check your email (and Spam folder).")
                     except Exception as err:
                         if "rate limit" in str(err).lower():
                             st.warning("⏳ Too many requests. Please check your inbox for the email we already sent.")
@@ -560,13 +586,12 @@ def main():
                     st.warning("Please enter your email.")
         return
 
-    # --- IF USER IS LOGGED IN (Home Screen & Features) ---
+    # IF USER IS LOGGED IN (Home Screen & Features)
     
-    # 🛠️ NEW: PASSWORD RESET BOX (Visible immediately after clicking link)
+    # 🛠️ PASSWORD RESET BOX (Visible immediately after logging in via link)
     if st.session_state.user:
-        # We show this expander at the top of the Home Screen for easy access
-        with st.expander("🔑 Did you just use a Reset Link?", expanded=True):
-            st.info("Set your new password here:")
+        with st.expander("🔑 Resetting Password?", expanded=True):
+            st.info("If you used a Reset Link, set your new password here:")
             c_pass, c_btn = st.columns([3, 1])
             with c_pass:
                 new_pass_home = st.text_input("New Password", type="password", key="new_p_home")
@@ -604,7 +629,7 @@ def main():
             st.session_state.clear()
             st.rerun()
 
-    # --- ROUTING ---
+    # ROUTING
     f = st.session_state.feature
     if f == "🏠 Home": render_home()
     elif f == "📸 Visual Sorter": render_visual_sorter()
