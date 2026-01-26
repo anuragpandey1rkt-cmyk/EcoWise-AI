@@ -474,30 +474,36 @@ def render_carbon_tracker():
         add_xp(xp_earned, f"Transport: {mode}")
 
 # ==========================================
-# 6. MAIN APP LOOP (With Magic Link Fix)
+# 6. MAIN APP LOOP (Final Fixed Version)
 # ==========================================
 def main():
     init_session_state()
     make_pwa_ready()
     
-    # --- 🛠️ FIX: CHECK FOR SESSION ON APP LOAD ---
-    # This detects if the user clicked a "Magic Link" or "Reset Password" link
+    # --- 🛠️ CRITICAL FIX: AUTO-LOGIN FROM EMAIL LINK ---
+    # This code checks if the user just arrived from a magic link
     if not st.session_state.user:
         try:
+            # This grabs the session token from the URL (if valid)
             session = supabase.auth.get_session()
             if session:
                 st.session_state.user = session.user
                 st.session_state.user_id = session.user.id
                 sync_user_stats(session.user.id)
-                st.rerun() # Refresh to show the Home Screen
-        except:
+                st.success("✅ Logged in successfully via Magic Link!")
+                time.sleep(1) # Brief pause so they see the success message
+                st.rerun()
+        except Exception as e:
+            # If the link is expired (otp_expired), this silently fails 
+            # and shows the login screen below, which is correct behavior.
             pass
-    # ---------------------------------------------
-    
+    # ---------------------------------------------------
+
     # --- IF USER IS NOT LOGGED IN ---
     if not st.session_state.user:
         st.title("🌱 EcoWise Login")
         
+        # Professional Toggle
         mode = st.radio("Choose Mode", ["Login", "Sign Up", "Forgot Password"], horizontal=True, label_visibility="collapsed")
 
         # --- MODE 1: LOGIN ---
@@ -540,21 +546,40 @@ def main():
             if st.button("Send Reset Link", use_container_width=True):
                 if reset_email:
                     try:
-                        # Ensure this URL matches your app exactly
+                        # Ensure this URL matches your deployed app URL exactly
                         supabase.auth.reset_password_email(reset_email, options={
                             "redirect_to": "https://ecowise-ai-2026.streamlit.app" 
                         })
                         st.success("✅ Link sent! Check your email (and Spam folder). Click the link to log in.")
                     except Exception as err:
                         if "rate limit" in str(err).lower():
-                            st.warning("⏳ Too many requests. Please wait a while or check your inbox for the previous email.")
+                            st.warning("⏳ Too many requests. Please check your inbox for the email we already sent.")
                         else:
                             st.error(f"Error: {str(err)}")
                 else:
                     st.warning("Please enter your email.")
         return
 
-    # --- IF USER IS LOGGED IN (Sidebar & Main App) ---
+    # --- IF USER IS LOGGED IN (Home Screen & Features) ---
+    
+    # 🛠️ NEW: PASSWORD RESET BOX (Visible immediately after clicking link)
+    if st.session_state.user:
+        # We show this expander at the top of the Home Screen for easy access
+        with st.expander("🔑 Did you just use a Reset Link?", expanded=True):
+            st.info("Set your new password here:")
+            c_pass, c_btn = st.columns([3, 1])
+            with c_pass:
+                new_pass_home = st.text_input("New Password", type="password", key="new_p_home")
+            with c_btn:
+                st.write("") # Spacer
+                st.write("") 
+                if st.button("Update", type="primary"):
+                    try:
+                        supabase.auth.update_user({"password": new_pass_home})
+                        st.success("✅ Password updated! You are all set.")
+                    except Exception as err:
+                        st.error(f"Error: {str(err)}")
+
     with st.sidebar:
         st.title("EcoWise")
         st.caption(f"User: {st.session_state.user.email}")
@@ -573,19 +598,6 @@ def main():
         if st.button("👣 Carbon Tracker"): navigate_to("👣 Carbon Tracker")
         if st.button("❌ Mistake Fixer"): navigate_to("❌ Mistake Explainer")
         
-        st.divider()
-        
-        # --- CHANGE PASSWORD (Only visible when logged in) ---
-        with st.expander("🔐 Change Password"):
-            new_pass = st.text_input("New Password", type="password", key="new_p_sidebar")
-            if st.button("Update Password"):
-                try:
-                    supabase.auth.update_user({"password": new_pass})
-                    st.success("✅ Password Updated!")
-                except Exception as err:
-                    st.error(f"Error: {str(err)}")
-        # ----------------------------------------------------
-
         st.divider()
         if st.button("🚪 Logout"): 
             supabase.auth.sign_out()
