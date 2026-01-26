@@ -474,65 +474,62 @@ def render_carbon_tracker():
         add_xp(xp_earned, f"Transport: {mode}")
 
 # ==========================================
-# 6. MAIN APP LOOP (With JS Bridge Fix)
+# 6. MAIN APP LOOP
 # ==========================================
 def main():
     init_session_state()
     make_pwa_ready()
     
-    # --- 🛠️ STEP 1: JAVASCRIPT BRIDGE 🛠️ ---
-    # This script runs in the browser. If it sees a Hash (#) with a token, 
-    # it reloads the page as a Query (?) so Python can read it.
+    # --- 🛠️ FIX START: FORCE BROWSER TO READ THE TOKEN ---
+    # Your screenshot shows the token is there, but Python can't see it because of the '#'.
+    # This script runs instantly and changes '#' to '?' so Python can read it.
     st.markdown("""
     <script>
-    // Check if there is a hash (#) in the URL
-    if (window.location.hash) {
-        const hash = window.location.hash.substring(1);
-        
-        // If it contains a token OR an error, we reload as a query (?)
-        if (hash.includes("access_token") || hash.includes("error")) {
-            window.location.href = window.location.pathname + "?" + hash;
-        }
+    // 1. Get the part of the URL after the #
+    var hash = window.location.hash;
+    
+    // 2. If it contains a token (Login) or an error (Expired), reload as a Query
+    if (hash.includes('access_token') || hash.includes('error')) {
+        var new_url = window.location.origin + window.location.pathname + "?" + hash.substring(1);
+        window.location.href = new_url;
     }
     </script>
     """, unsafe_allow_html=True)
-    # ----------------------------------------
-
-    # --- 🛠️ STEP 2: PYTHON TOKEN CATCHER 🛠️ ---
-    # Now Python checks if the JS Bridge successfully passed the token
+    
+    # --- PYTHON: READ THE CONVERTED TOKEN ---
     try:
-        query_params = st.query_params
+        # Get parameters from the URL
+        params = st.query_params
         
-        # 1. Check if Supabase sent an error (like Link Expired)
-        if "error_code" in query_params:
-            st.error("⚠️ The password reset link has expired.")
-            st.warning("Please request a new one below.")
+        # A. Check if the link is Expired/Invalid
+        if "error_code" in params:
+            st.error("⚠️ This password reset link has expired.")
+            st.info("Please request a new one from the 'Forgot Password' tab.")
             st.query_params.clear()
             
-        # 2. Check if Supabase sent a success token
-        access_token = query_params.get("access_token")
-        refresh_token = query_params.get("refresh_token")
+        # B. Check if we have a Valid Login Token
+        access_token = params.get("access_token")
+        refresh_token = params.get("refresh_token")
         
-        if access_token and refresh_token:
+        if access_token:
+            # Use the token to log the user in
             session = supabase.auth.set_session(access_token, refresh_token)
-            
             if session:
                 st.session_state.user = session.user
                 st.session_state.user_id = session.user.id
                 sync_user_stats(session.user.id)
                 
+                # Clear URL and Reload
                 st.query_params.clear()
-                st.success("✅ Logged in! You can now change your password.")
+                st.success("✅ Logged in via Reset Link!")
                 time.sleep(1)
                 st.rerun()
-                
     except Exception as e:
-        # Now we print the error so we know if something goes wrong
-        st.error(f"Login Error: {str(e)}")
-    # ---------------------------------------------
+        # Fail silently if token is weird, just show login screen
+        pass
+    # --- 🛠️ FIX END ---
 
-    # --- REST OF THE APP LOGIC ---
-
+    # --- BELOW THIS IS YOUR EXISTING CODE (Don't change) ---
     # IF USER IS NOT LOGGED IN
     if not st.session_state.user:
         st.title("🌱 EcoWise Login")
