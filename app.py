@@ -474,58 +474,88 @@ def render_carbon_tracker():
         add_xp(xp_earned, f"Transport: {mode}")
 
 # ==========================================
-# 6. MAIN APP LOOP
+# 6. MAIN APP LOOP (Final Polish)
 # ==========================================
 def main():
     init_session_state()
     make_pwa_ready()
     
+    # --- IF USER IS NOT LOGGED IN ---
     if not st.session_state.user:
         st.title("🌱 EcoWise Login")
-        t1, t2 = st.tabs(["Login", "Sign Up"])
-        with t1:
+        
+        # Professional Toggle for Modes
+        mode = st.radio("Choose Mode", ["Login", "Sign Up", "Forgot Password"], horizontal=True, label_visibility="collapsed")
+
+        # --- MODE 1: LOGIN ---
+        if mode == "Login":
+            st.subheader("Welcome Back!")
             e = st.text_input("Email")
             p = st.text_input("Password", type="password")
-            if st.button("Login"): 
+            
+            if st.button("Login", use_container_width=True): 
                 try:
                     res = supabase.auth.sign_in_with_password({"email": e, "password": p})
-                    st.session_state.user = res.user; st.session_state.user_id = res.user.id
-                    sync_user_stats(res.user.id); st.rerun()
-                except Exception as err: st.error(str(err))
-            
-            with st.expander("Forgot Password?"):
-                st.caption("Enter your email to receive a password reset link.")
-                reset_email = st.text_input("Recovery Email")
-                if st.button("Send Reset Link"):
-                    try:
-                        supabase.auth.reset_password_email(reset_email)
-                        st.success("Check your email! Click the link to log in, then change your password.")
-                    except Exception as err:
-                        st.error(f"Error: {str(err)}")
-        with t2:
+                    st.session_state.user = res.user
+                    st.session_state.user_id = res.user.id
+                    sync_user_stats(res.user.id)
+                    st.rerun()
+                except Exception as err:
+                    st.error(f"Login failed: {str(err)}")
+
+        # --- MODE 2: SIGN UP ---
+        elif mode == "Sign Up":
+            st.subheader("Create an Account")
             e2 = st.text_input("Email (New)")
             p2 = st.text_input("Password (New)", type="password")
-            if st.button("Sign Up"):
+            
+            if st.button("Sign Up", use_container_width=True):
                 try:
                     # We ONLY create the Auth user here.
                     # We do NOT write to the database yet to avoid the "Security Policy" error.
                     res = supabase.auth.sign_up({"email": e2, "password": p2})
                     
                     if res.user: 
-                        # Clear message about email verification
-                        st.success("✅ Account created! Please check your email to verify your account, then Login.")
+                        st.success("✅ Account created! Please check your email (and Spam folder) to verify your account, then Login.")
                 except Exception as err: 
                     st.error(f"Error: {str(err)}")
+
+        # --- MODE 3: FORGOT PASSWORD ---
+        elif mode == "Forgot Password":
+            st.subheader("Reset Your Password")
+            st.info("Enter your email address. We will send you a secure link to log in instantly.")
+            
+            reset_email = st.text_input("Registered Email ID")
+            
+            if st.button("Send Reset Link", use_container_width=True):
+                if reset_email:
+                    try:
+                        # IMPORTANT: Ensure this URL matches your actual deployed app URL
+                        # If running locally, use http://localhost:8501
+                        supabase.auth.reset_password_email(reset_email, options={
+                            "redirect_to": "https://ecowise-ai-2026.streamlit.app" 
+                        })
+                        st.success("✅ Link sent! Check your email (and Spam folder). Click the link to log in.")
+                    except Exception as err:
+                        error_msg = str(err).lower()
+                        if "rate limit" in error_msg:
+                            st.warning("⏳ You have requested too many emails recently. Please wait a while before trying again.")
+                        else:
+                            st.error(f"Error: {str(err)}")
+                else:
+                    st.warning("Please enter your email.")
         return
 
+    # --- IF USER IS LOGGED IN (Sidebar & Main App) ---
     with st.sidebar:
         st.title("EcoWise")
         st.caption(f"User: {st.session_state.user.email}")
         st.divider()
+        
         if st.button("🏠 Home"): navigate_to("🏠 Home")
         if st.button("📸 Visual Sorter"): navigate_to("📸 Visual Sorter")
         if st.button("🎙️ Voice Mode"): navigate_to("🎙️ Voice Mode")
-        if st.button("♻️ Recycling Bot"): navigate_to("♻️ Recycle Assistant")
+        if st.button("♻️ Recycle Assistant"): navigate_to("♻️ Recycle Assistant")
         if st.button("🗺️ Eco-Map"): navigate_to("🗺️ Eco-Map")
         if st.button("🌊 Plastic Calc"): navigate_to("🌊 Plastic Calculator")
         if st.button("🎨 Upcycling"): navigate_to("🎨 Upcycling Station")
@@ -534,20 +564,27 @@ def main():
         if st.button("🏆 Leaderboard"): navigate_to("🏆 Leaderboard")
         if st.button("👣 Carbon Tracker"): navigate_to("👣 Carbon Tracker")
         if st.button("❌ Mistake Fixer"): navigate_to("❌ Mistake Explainer")
+        
+        st.divider()
+        
+        # --- CHANGE PASSWORD (Only visible when logged in) ---
         with st.expander("🔐 Change Password"):
             new_pass = st.text_input("New Password", type="password", key="new_p_sidebar")
             if st.button("Update Password"):
                 try:
                     supabase.auth.update_user({"password": new_pass})
-                    st.success("Password Updated Successfully!")
+                    st.success("✅ Password Updated! You can now login with this new password.")
                 except Exception as err:
                     st.error(f"Error: {str(err)}")
+        # ----------------------------------------------------
+
         st.divider()
         if st.button("🚪 Logout"): 
             supabase.auth.sign_out()
             st.session_state.clear()
             st.rerun()
 
+    # --- ROUTING ---
     f = st.session_state.feature
     if f == "🏠 Home": render_home()
     elif f == "📸 Visual Sorter": render_visual_sorter()
