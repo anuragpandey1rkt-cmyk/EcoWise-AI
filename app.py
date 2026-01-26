@@ -497,11 +497,15 @@ def main():
             p2 = st.text_input("Password (New)", type="password")
             if st.button("Sign Up"):
                 try:
+                    # We ONLY create the Auth user here.
+                    # We do NOT write to the database yet to avoid the "Security Policy" error.
                     res = supabase.auth.sign_up({"email": e2, "password": p2})
+                    
                     if res.user: 
-                        supabase.table("user_stats").insert({"user_id": res.user.id}).execute()
-                        st.success("Created! Please Login.")
-                except Exception as err: st.error(str(err))
+                        # Clear message about email verification
+                        st.success("✅ Account created! Please check your email to verify your account, then Login.")
+                except Exception as err: 
+                    st.error(f"Error: {str(err)}")
         return
 
     with st.sidebar:
