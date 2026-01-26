@@ -485,10 +485,14 @@ def main():
     # it reloads the page as a Query (?) so Python can read it.
     st.markdown("""
     <script>
-    if (window.location.hash && window.location.hash.includes("access_token")) {
+    // Check if there is a hash (#) in the URL
+    if (window.location.hash) {
         const hash = window.location.hash.substring(1);
-        // Reload the page with the hash converted to query parameters
-        window.location.href = window.location.pathname + "?" + hash;
+        
+        // If it contains a token OR an error, we reload as a query (?)
+        if (hash.includes("access_token") || hash.includes("error")) {
+            window.location.href = window.location.pathname + "?" + hash;
+        }
     }
     </script>
     """, unsafe_allow_html=True)
@@ -497,15 +501,19 @@ def main():
     # --- 🛠️ STEP 2: PYTHON TOKEN CATCHER 🛠️ ---
     # Now Python checks if the JS Bridge successfully passed the token
     try:
-        # Get query parameters
         query_params = st.query_params
         
-        # Check if we have the tokens
+        # 1. Check if Supabase sent an error (like Link Expired)
+        if "error_code" in query_params:
+            st.error("⚠️ The password reset link has expired.")
+            st.warning("Please request a new one below.")
+            st.query_params.clear()
+            
+        # 2. Check if Supabase sent a success token
         access_token = query_params.get("access_token")
         refresh_token = query_params.get("refresh_token")
         
         if access_token and refresh_token:
-            # Manually set the session using the tokens
             session = supabase.auth.set_session(access_token, refresh_token)
             
             if session:
@@ -513,15 +521,14 @@ def main():
                 st.session_state.user_id = session.user.id
                 sync_user_stats(session.user.id)
                 
-                # Clear the URL so it looks clean
                 st.query_params.clear()
-                
-                st.success("✅ Logged in via Reset Link!")
+                st.success("✅ Logged in! You can now change your password.")
                 time.sleep(1)
                 st.rerun()
+                
     except Exception as e:
-        # If any error happens during token parsing, just ignore it and show login
-        pass
+        # Now we print the error so we know if something goes wrong
+        st.error(f"Login Error: {str(e)}")
     # ---------------------------------------------
 
     # --- REST OF THE APP LOGIC ---
