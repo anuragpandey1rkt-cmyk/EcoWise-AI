@@ -233,3 +233,6 @@ NGO & municipality integrations
 Real-time IoT waste data
 
 Rewards & badges system
+
+
+
