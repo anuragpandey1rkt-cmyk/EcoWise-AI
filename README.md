@@ -234,5 +234,3 @@ Real-time IoT waste data
 
 Rewards & badges system
 
-
-
